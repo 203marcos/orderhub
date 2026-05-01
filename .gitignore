@@ -1,0 +1,39 @@
+# Build
+target/
+*.class
+*.jar
+*.war
+
+# Maven
+.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+# IDE
+.idea/
+*.iml
+*.iws
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Env / secrets
+.env
+*.env.local
+application-local.yml
+application-secrets.yml
+
+# Claude Code
+.claude/
+
+# Planning docs
+initial.txt
+CLAUDE.md
