@@ -1,0 +1,64 @@
+{{- if .Values.catalogService.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalog-service
+  namespace: {{ .Release.Namespace | default "orderhub" }}
+  labels:
+    app: catalog-service
+    {{- include "orderhub.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.catalogService.replicas }}
+  selector:
+    matchLabels:
+      app: catalog-service
+  template:
+    metadata:
+      labels:
+        app: catalog-service
+    spec:
+      containers:
+        - name: catalog-service
+          image: {{ .Values.global.imageRegistry }}/{{ .Values.catalogService.image }}:{{ .Values.global.imageTag }}
+          ports:
+            - containerPort: {{ .Values.catalogService.port }}
+          env:
+            - name: DB_URL
+              value: jdbc:postgresql://postgres-catalog:5432/{{ .Values.catalogService.db.name }}
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: orderhub-secrets
+                  key: db-username
+            - name: DB_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: orderhub-secrets
+                  key: db-password
+            - name: REDIS_HOST
+              value: redis
+            - name: REDIS_PORT
+              value: "6379"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://jaeger:4317
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: {{ .Values.catalogService.port }}
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: catalog-service
+  namespace: {{ .Release.Namespace | default "orderhub" }}
+spec:
+  selector:
+    app: catalog-service
+  ports:
+    - port: {{ .Values.catalogService.port }}
+      targetPort: {{ .Values.catalogService.port }}
+{{- end }}
