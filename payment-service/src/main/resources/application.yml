@@ -41,6 +41,14 @@ management:
       prometheus:
         enabled: true
 
+management:
+  tracing:
+    sampling:
+      probability: 1.0
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4317}
+
 springdoc:
   api-docs:
     path: /v3/api-docs
