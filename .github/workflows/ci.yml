@@ -48,6 +48,9 @@ jobs:
       - name: Unit tests - order-service
         run: mvn test -pl order-service --no-transfer-progress
 
+      - name: Copy Pact files to provider
+        run: mkdir -p payment-service/pacts && cp order-service/target/pacts/*.json payment-service/pacts/
+
       - name: Unit tests - payment-service
         run: mvn test -pl payment-service --no-transfer-progress
 
