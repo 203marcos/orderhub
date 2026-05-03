@@ -39,29 +39,23 @@ jobs:
       - name: Build (skip tests)
         run: mvn clean package -DskipTests --no-transfer-progress
 
-      - name: Unit tests - auth-service
-        run: mvn test -pl auth-service --no-transfer-progress
+      - name: Test auth-service
+        run: mvn verify -pl auth-service -DexcludedGroups="" --no-transfer-progress
 
-      - name: Unit tests - catalog-service
-        run: mvn test -pl catalog-service --no-transfer-progress
+      - name: Test catalog-service
+        run: mvn verify -pl catalog-service -DexcludedGroups="" --no-transfer-progress
 
-      - name: Unit tests - order-service
-        run: mvn test -pl order-service --no-transfer-progress
+      - name: Test order-service
+        run: mvn verify -pl order-service -DexcludedGroups="" --no-transfer-progress
 
       - name: Copy Pact files to provider
         run: mkdir -p payment-service/pacts && cp order-service/target/pacts/*.json payment-service/pacts/
 
-      - name: Unit tests - payment-service
-        run: mvn test -pl payment-service --no-transfer-progress
+      - name: Test payment-service
+        run: mvn verify -pl payment-service -DexcludedGroups="" --no-transfer-progress
 
-      - name: Unit tests - notification-service
-        run: mvn test -pl notification-service --no-transfer-progress
-
-      - name: Run integration tests
-        run: mvn test -Dgroups=integration -DexcludedGroups="" --no-transfer-progress
-
-      - name: Check coverage thresholds and generate reports
-        run: mvn verify -DskipTests --no-transfer-progress
+      - name: Test notification-service
+        run: mvn verify -pl notification-service -DexcludedGroups="" --no-transfer-progress
 
       - name: Upload coverage reports
         if: always()
