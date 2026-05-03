@@ -39,8 +39,20 @@ jobs:
       - name: Build (skip tests)
         run: mvn clean package -DskipTests --no-transfer-progress
 
-      - name: Run unit tests
-        run: mvn test --no-transfer-progress
+      - name: Unit tests - auth-service
+        run: mvn test -pl auth-service --no-transfer-progress
+
+      - name: Unit tests - catalog-service
+        run: mvn test -pl catalog-service --no-transfer-progress
+
+      - name: Unit tests - order-service
+        run: mvn test -pl order-service --no-transfer-progress
+
+      - name: Unit tests - payment-service
+        run: mvn test -pl payment-service --no-transfer-progress
+
+      - name: Unit tests - notification-service
+        run: mvn test -pl notification-service --no-transfer-progress
 
       - name: Run integration tests
         run: mvn verify -Dgroups=integration --no-transfer-progress
