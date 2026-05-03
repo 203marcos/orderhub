@@ -49,8 +49,6 @@ management:
     export:
       prometheus:
         enabled: true
-
-management:
   tracing:
     sampling:
       probability: 1.0

@@ -5,6 +5,7 @@ import au.com.dius.pact.consumer.dsl.PactDslJsonBody;
 import au.com.dius.pact.consumer.dsl.PactDslWithProvider;
 import au.com.dius.pact.consumer.junit5.PactConsumerTestExt;
 import au.com.dius.pact.consumer.junit5.PactTestFor;
+import au.com.dius.pact.core.model.PactSpecVersion;
 import au.com.dius.pact.core.model.RequestResponsePact;
 import au.com.dius.pact.core.model.annotations.Pact;
 import org.junit.jupiter.api.Test;
@@ -13,16 +14,15 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.Map;
-import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 @ExtendWith(PactConsumerTestExt.class)
-@PactTestFor(providerName = "payment-service")
+@PactTestFor(providerName = "payment-service", pactVersion = PactSpecVersion.V3)
 class PaymentServiceContractTest {
 
     @Pact(consumer = "order-service", provider = "payment-service")
-    RequestResponsePact getPaymentByOrderId(PactDslWithProvider builder) {
+    public RequestResponsePact getPaymentByOrderId(PactDslWithProvider builder) {
         return builder
                 .given("payment exists for order")
                 .uponReceiving("get payment by order id")
