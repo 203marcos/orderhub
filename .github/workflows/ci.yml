@@ -58,13 +58,10 @@ jobs:
         run: mvn test -pl notification-service --no-transfer-progress
 
       - name: Run integration tests
-        run: mvn verify -Dgroups=integration -DexcludedGroups="" -Djacoco.skip=true --no-transfer-progress
+        run: mvn test -Dgroups=integration -DexcludedGroups="" --no-transfer-progress
 
-      - name: Generate coverage reports
-        run: mvn jacoco:report --no-transfer-progress
-
-      - name: Check coverage thresholds
-        run: mvn jacoco:check --no-transfer-progress
+      - name: Check coverage thresholds and generate reports
+        run: mvn verify -DskipTests --no-transfer-progress
 
       - name: Upload coverage reports
         if: always()
