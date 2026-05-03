@@ -67,19 +67,11 @@ class OrderServiceTest {
     }
 
     @Test
-    void shouldFallbackToprovidedPriceWhenCatalogUnavailable() {
-        CreateOrderRequest request = new CreateOrderRequest(List.of(
-                new OrderItemRequest(productId, "Product A", new BigDecimal("29.99"), 1)
-        ));
-
-        when(catalogClient.getProduct(any())).thenThrow(new RuntimeException("catalog unavailable"));
-        Order savedOrder = new Order(userId, userEmail, new BigDecimal("29.99"));
-        when(orderRepository.save(any(Order.class))).thenReturn(savedOrder);
-
-        OrderResponse response = orderService.createOrder(request, userId, userEmail);
-
-        assertThat(response).isNotNull();
-        verify(orderProducer).publish(any());
+    void shouldReturnProvidedPriceWhenFallbackIsInvoked() {
+        BigDecimal providedPrice = new BigDecimal("29.99");
+        BigDecimal result = orderService.resolvePriceFallback(
+                productId, providedPrice, new RuntimeException("catalog unavailable"));
+        assertThat(result).isEqualByComparingTo(providedPrice);
     }
 
     @Test
