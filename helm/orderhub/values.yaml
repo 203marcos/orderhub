@@ -1,0 +1,71 @@
+global:
+  imageRegistry: ghcr.io/marcosdias/orderhub
+  imageTag: latest
+  jwtSecret: "dGVzdFNlY3JldEtleUZvckp3dFRlc3RpbmdPcmRlckh1YlByb2plY3QyMDI2IQ=="
+
+postgres:
+  password: orderhub123
+  username: orderhub
+
+apiGateway:
+  enabled: true
+  replicas: 1
+  image: api-gateway
+  port: 8080
+  service:
+    type: LoadBalancer
+
+authService:
+  enabled: true
+  replicas: 1
+  image: auth-service
+  port: 8081
+  db:
+    name: auth_db
+
+catalogService:
+  enabled: true
+  replicas: 1
+  image: catalog-service
+  port: 8082
+  db:
+    name: catalog_db
+
+orderService:
+  enabled: true
+  replicas: 1
+  image: order-service
+  port: 8083
+  db:
+    name: order_db
+
+paymentService:
+  enabled: true
+  replicas: 1
+  image: payment-service
+  port: 8084
+  db:
+    name: payment_db
+
+notificationService:
+  enabled: true
+  replicas: 1
+  image: notification-service
+  port: 8085
+
+kafka:
+  enabled: true
+
+redis:
+  enabled: true
+
+jaeger:
+  enabled: true
+
+resources:
+  requests:
+    memory: "256Mi"
+    cpu: "100m"
+  limits:
+    memory: "512Mi"
+    cpu: "500m"

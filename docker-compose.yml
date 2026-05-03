@@ -34,6 +34,40 @@ services:
       timeout: 5s
       retries: 5
 
+  postgres-order:
+    image: postgres:16-alpine
+    container_name: orderhub-postgres-order
+    environment:
+      POSTGRES_DB: order_db
+      POSTGRES_USER: orderhub
+      POSTGRES_PASSWORD: orderhub123
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres-order-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orderhub -d order_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  postgres-payment:
+    image: postgres:16-alpine
+    container_name: orderhub-postgres-payment
+    environment:
+      POSTGRES_DB: payment_db
+      POSTGRES_USER: orderhub
+      POSTGRES_PASSWORD: orderhub123
+    ports:
+      - "5435:5432"
+    volumes:
+      - postgres-payment-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orderhub -d payment_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   redis:
     image: redis:7-alpine
     container_name: orderhub-redis
@@ -44,6 +78,43 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.1
+    container_name: orderhub-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: orderhub-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: orderhub-mailhog
+    ports:
+      - "1025:1025"
+      - "8025:8025"
 
   prometheus:
     image: prom/prometheus:latest
@@ -62,10 +133,42 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: admin
     volumes:
       - grafana-data:/var/lib/grafana
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning
     depends_on:
       - prometheus
+
+  loki:
+    image: grafana/loki:2.9.4
+    container_name: orderhub-loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./infra/loki/loki.yml:/etc/loki/local-config.yaml
+    command: -config.file=/etc/loki/local-config.yaml
+
+  promtail:
+    image: grafana/promtail:2.9.4
+    container_name: orderhub-promtail
+    volumes:
+      - /var/log:/var/log
+      - ./infra/promtail/promtail.yml:/etc/promtail/config.yml
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.56
+    container_name: orderhub-jaeger
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
 
 volumes:
   postgres-auth-data:
   postgres-catalog-data:
+  postgres-order-data:
+  postgres-payment-data:
   grafana-data:

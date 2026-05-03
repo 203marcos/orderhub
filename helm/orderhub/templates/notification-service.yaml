@@ -1,0 +1,52 @@
+{{- if .Values.notificationService.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification-service
+  namespace: {{ .Release.Namespace | default "orderhub" }}
+  labels:
+    app: notification-service
+    {{- include "orderhub.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.notificationService.replicas }}
+  selector:
+    matchLabels:
+      app: notification-service
+  template:
+    metadata:
+      labels:
+        app: notification-service
+    spec:
+      containers:
+        - name: notification-service
+          image: {{ .Values.global.imageRegistry }}/{{ .Values.notificationService.image }}:{{ .Values.global.imageTag }}
+          ports:
+            - containerPort: {{ .Values.notificationService.port }}
+          env:
+            - name: KAFKA_SERVERS
+              value: kafka:9092
+            - name: MAIL_HOST
+              value: mailhog
+            - name: MAIL_PORT
+              value: "1025"
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: {{ .Values.notificationService.port }}
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: notification-service
+  namespace: {{ .Release.Namespace | default "orderhub" }}
+spec:
+  selector:
+    app: notification-service
+  ports:
+    - port: {{ .Values.notificationService.port }}
+      targetPort: {{ .Values.notificationService.port }}
+{{- end }}

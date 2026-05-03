@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, week2, week3, week4, week5 ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    name: Build & Test
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: test_db
+          POSTGRES_USER: orderhub
+          POSTGRES_PASSWORD: orderhub123
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U orderhub"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Build (skip tests)
+        run: mvn clean package -DskipTests --no-transfer-progress
+
+      - name: Test auth-service
+        run: mvn verify -pl auth-service -DexcludedGroups="" --no-transfer-progress
+
+      - name: Test catalog-service
+        run: mvn verify -pl catalog-service -DexcludedGroups="" --no-transfer-progress
+
+      - name: Test order-service
+        run: mvn verify -pl order-service -DexcludedGroups="" --no-transfer-progress
+
+      - name: Copy Pact files to provider
+        run: mkdir -p payment-service/pacts && cp order-service/target/pacts/*.json payment-service/pacts/
+
+      - name: Test payment-service
+        run: mvn verify -pl payment-service -DexcludedGroups="" --no-transfer-progress
+
+      - name: Test notification-service
+        run: mvn verify -pl notification-service -DexcludedGroups="" --no-transfer-progress
+
+      - name: Upload coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: '**/target/site/jacoco/'
+
+  security-scan:
+    name: Trivy Security Scan
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'table'
+          exit-code: '0'
+          severity: 'CRITICAL,HIGH'
