@@ -3,6 +3,7 @@ package com.orderhub.auth.integration;
 import com.orderhub.auth.dto.AuthResponse;
 import com.orderhub.auth.dto.LoginRequest;
 import com.orderhub.auth.dto.RegisterRequest;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -15,6 +16,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
+@Tag("integration")
 class AuthIntegrationTest {
 
     @Autowired
