@@ -76,6 +76,23 @@ class PaymentServiceTest {
     }
 
     @Test
+    void shouldIgnoreDuplicateOrderCreatedEvent() {
+        OrderCreatedEvent event = new OrderCreatedEvent(
+                orderId, userId, userEmail, List.of(), new BigDecimal("99.99"), LocalDateTime.now()
+        );
+        Payment existing = new Payment(orderId, userId, userEmail, new BigDecimal("99.99"));
+        existing.approve();
+        when(paymentRepository.findByOrderId(orderId)).thenReturn(Optional.of(existing));
+
+        // Kafka is at-least-once and payments.order_id is unique: a blind insert would
+        // throw and the record would be retried forever.
+        paymentService.processPayment(event);
+
+        verify(paymentRepository, never()).save(any());
+        verifyNoInteractions(eventProducer);
+    }
+
+    @Test
     void shouldGetPaymentByOrderId() {
         Payment payment = new Payment(orderId, userId, userEmail, new BigDecimal("50.00"));
         when(paymentRepository.findByOrderId(orderId)).thenReturn(Optional.of(payment));

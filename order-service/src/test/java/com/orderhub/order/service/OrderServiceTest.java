@@ -165,26 +165,51 @@ class OrderServiceTest {
     @Test
     void shouldConfirmOrder() {
         UUID orderId = UUID.randomUUID();
-        Order order = mock(Order.class);
+        Order order = new Order(userId, userEmail, new BigDecimal("50.00"));
         when(orderRepository.findById(orderId)).thenReturn(Optional.of(order));
-        when(orderRepository.save(order)).thenReturn(order);
 
         orderService.confirmOrder(orderId);
 
-        verify(order).setStatus(OrderStatus.CONFIRMED);
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.CONFIRMED);
         verify(orderRepository).save(order);
     }
 
     @Test
     void shouldFailOrder() {
         UUID orderId = UUID.randomUUID();
-        Order order = mock(Order.class);
+        Order order = new Order(userId, userEmail, new BigDecimal("50.00"));
         when(orderRepository.findById(orderId)).thenReturn(Optional.of(order));
-        when(orderRepository.save(order)).thenReturn(order);
 
         orderService.failOrder(orderId);
 
-        verify(order).setStatus(OrderStatus.PAYMENT_FAILED);
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.PAYMENT_FAILED);
+    }
+
+    @Test
+    void shouldIgnoreRedeliveredApprovalForAnAlreadySettledOrder() {
+        UUID orderId = UUID.randomUUID();
+        Order order = new Order(userId, userEmail, new BigDecimal("50.00"));
+        order.setStatus(OrderStatus.CONFIRMED);
+        when(orderRepository.findById(orderId)).thenReturn(Optional.of(order));
+
+        orderService.confirmOrder(orderId);
+
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.CONFIRMED);
+        verify(orderRepository, never()).save(any());
+    }
+
+    @Test
+    void shouldNotLetALateFailureOverrideAConfirmedOrder() {
+        UUID orderId = UUID.randomUUID();
+        Order order = new Order(userId, userEmail, new BigDecimal("50.00"));
+        order.setStatus(OrderStatus.CONFIRMED);
+        when(orderRepository.findById(orderId)).thenReturn(Optional.of(order));
+
+        // payment.approved and payment.failed are separate topics with no ordering guarantee.
+        orderService.failOrder(orderId);
+
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.CONFIRMED);
+        verify(orderRepository, never()).save(any());
     }
 
     @Test

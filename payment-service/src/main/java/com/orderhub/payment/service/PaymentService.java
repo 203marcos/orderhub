@@ -8,6 +8,8 @@ import com.orderhub.payment.event.PaymentFailedEvent;
 import com.orderhub.payment.exception.PaymentNotFoundException;
 import com.orderhub.payment.kafka.PaymentEventProducer;
 import com.orderhub.payment.repository.PaymentRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -17,6 +19,8 @@ import java.util.UUID;
 @Service
 public class PaymentService {
 
+    private static final Logger log = LoggerFactory.getLogger(PaymentService.class);
+
     private final PaymentRepository paymentRepository;
     private final PaymentEventProducer eventProducer;
 
@@ -25,8 +29,18 @@ public class PaymentService {
         this.eventProducer = eventProducer;
     }
 
+    /**
+     * Kafka delivers at least once, so this can be called more than once for the same order.
+     * {@code payments.order_id} is unique, so a blind insert would throw and the record would
+     * be retried forever; an already-processed order is simply acknowledged instead.
+     */
     @Transactional
     public void processPayment(OrderCreatedEvent event) {
+        if (paymentRepository.findByOrderId(event.orderId()).isPresent()) {
+            log.info("Payment already exists for order {}, ignoring duplicate event", event.orderId());
+            return;
+        }
+
         Payment payment = new Payment(
                 event.orderId(),
                 event.userId(),

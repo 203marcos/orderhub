@@ -12,6 +12,8 @@ import com.orderhub.order.exception.OrderNotFoundException;
 import com.orderhub.order.exception.ProductUnavailableException;
 import com.orderhub.order.kafka.OrderProducer;
 import com.orderhub.order.repository.OrderRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,6 +22,8 @@ import java.util.UUID;
 
 @Service
 public class OrderService {
+
+    private static final Logger log = LoggerFactory.getLogger(OrderService.class);
 
     private final OrderRepository orderRepository;
     private final OrderProducer orderProducer;
@@ -84,17 +88,31 @@ public class OrderService {
 
     @Transactional
     public void confirmOrder(UUID orderId) {
-        Order order = orderRepository.findById(orderId)
-                .orElseThrow(() -> new OrderNotFoundException(orderId));
-        order.setStatus(OrderStatus.CONFIRMED);
-        orderRepository.save(order);
+        applySagaOutcome(orderId, OrderStatus.CONFIRMED);
     }
 
     @Transactional
     public void failOrder(UUID orderId) {
+        applySagaOutcome(orderId, OrderStatus.PAYMENT_FAILED);
+    }
+
+    /**
+     * Applies a payment outcome to an order exactly once.
+     *
+     * <p>Kafka delivers at least once and gives no ordering guarantee across the
+     * {@code payment.approved} and {@code payment.failed} topics, so a redelivered event
+     * could otherwise flip an order that has already settled. Only a PENDING order moves.
+     */
+    private void applySagaOutcome(UUID orderId, OrderStatus outcome) {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new OrderNotFoundException(orderId));
-        order.setStatus(OrderStatus.PAYMENT_FAILED);
+
+        if (order.getStatus() != OrderStatus.PENDING) {
+            log.info("Order {} is already {}, ignoring {} event", orderId, order.getStatus(), outcome);
+            return;
+        }
+
+        order.setStatus(outcome);
         orderRepository.save(order);
     }
 
