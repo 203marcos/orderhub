@@ -21,13 +21,17 @@ spring:
     bootstrap-servers: ${KAFKA_SERVERS:localhost:9092}
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
-      properties:
-        spring.json.add.type.headers: false
+      # Payloads are serialized when the outbox row is written, so they travel as strings.
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
     consumer:
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       auto-offset-reset: earliest
+
+outbox:
+  poll-interval-ms: ${OUTBOX_POLL_INTERVAL_MS:500}
+  batch-size: ${OUTBOX_BATCH_SIZE:100}
 
 management:
   endpoints:

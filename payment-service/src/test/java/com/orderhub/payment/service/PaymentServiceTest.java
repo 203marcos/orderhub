@@ -5,13 +5,17 @@ import com.orderhub.payment.entity.Payment;
 import com.orderhub.payment.entity.PaymentStatus;
 import com.orderhub.payment.event.OrderCreatedEvent;
 import com.orderhub.payment.exception.PaymentNotFoundException;
-import com.orderhub.payment.kafka.PaymentEventProducer;
+import com.orderhub.payment.outbox.OutboxEvent;
+import com.orderhub.payment.outbox.OutboxRepository;
 import com.orderhub.payment.repository.PaymentRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
@@ -29,7 +33,10 @@ import static org.mockito.Mockito.*;
 class PaymentServiceTest {
 
     @Mock PaymentRepository paymentRepository;
-    @Mock PaymentEventProducer eventProducer;
+    @Mock OutboxRepository outboxRepository;
+
+    // A real mapper: the point of the outbox row is that it carries a genuine serialized payload.
+    @Spy ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
 
     @InjectMocks PaymentService paymentService;
 
@@ -56,8 +63,7 @@ class PaymentServiceTest {
         paymentService.processPayment(event);
 
         verify(paymentRepository).save(any());
-        verify(eventProducer).publishApproved(any());
-        verify(eventProducer, never()).publishFailed(any());
+        assertThat(stagedEvent().getTopic()).isEqualTo("payment.approved");
     }
 
     @Test
@@ -71,8 +77,16 @@ class PaymentServiceTest {
 
         paymentService.processPayment(event);
 
-        verify(eventProducer).publishFailed(any());
-        verify(eventProducer, never()).publishApproved(any());
+        OutboxEvent staged = stagedEvent();
+        assertThat(staged.getTopic()).isEqualTo("payment.failed");
+        assertThat(staged.getPayload()).contains("Insufficient funds");
+    }
+
+    /** The outcome is staged in the outbox inside the same transaction, not sent to Kafka here. */
+    private OutboxEvent stagedEvent() {
+        ArgumentCaptor<OutboxEvent> captor = ArgumentCaptor.forClass(OutboxEvent.class);
+        verify(outboxRepository).save(captor.capture());
+        return captor.getValue();
     }
 
     @Test
@@ -89,7 +103,7 @@ class PaymentServiceTest {
         paymentService.processPayment(event);
 
         verify(paymentRepository, never()).save(any());
-        verifyNoInteractions(eventProducer);
+        verifyNoInteractions(outboxRepository);
     }
 
     @Test

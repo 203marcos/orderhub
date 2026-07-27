@@ -6,8 +6,11 @@ import com.orderhub.payment.event.OrderCreatedEvent;
 import com.orderhub.payment.event.PaymentApprovedEvent;
 import com.orderhub.payment.event.PaymentFailedEvent;
 import com.orderhub.payment.exception.PaymentNotFoundException;
-import com.orderhub.payment.kafka.PaymentEventProducer;
+import com.orderhub.payment.outbox.OutboxEvent;
+import com.orderhub.payment.outbox.OutboxRepository;
 import com.orderhub.payment.repository.PaymentRepository;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -21,12 +24,18 @@ public class PaymentService {
 
     private static final Logger log = LoggerFactory.getLogger(PaymentService.class);
 
-    private final PaymentRepository paymentRepository;
-    private final PaymentEventProducer eventProducer;
+    private static final String APPROVED_TOPIC = "payment.approved";
+    private static final String FAILED_TOPIC = "payment.failed";
 
-    public PaymentService(PaymentRepository paymentRepository, PaymentEventProducer eventProducer) {
+    private final PaymentRepository paymentRepository;
+    private final OutboxRepository outboxRepository;
+    private final ObjectMapper objectMapper;
+
+    public PaymentService(PaymentRepository paymentRepository, OutboxRepository outboxRepository,
+                          ObjectMapper objectMapper) {
         this.paymentRepository = paymentRepository;
-        this.eventProducer = eventProducer;
+        this.outboxRepository = outboxRepository;
+        this.objectMapper = objectMapper;
     }
 
     /**
@@ -50,26 +59,41 @@ public class PaymentService {
 
         boolean approved = simulatePaymentGateway(event);
 
+        // The outcome event goes to the outbox, not straight to Kafka: the payment row and its
+        // event commit together, so order-service can never be told about a payment that was
+        // rolled back — nor left waiting on one that was recorded. See OutboxPublisher.
         if (approved) {
             payment.approve();
-            paymentRepository.save(payment);
-            eventProducer.publishApproved(new PaymentApprovedEvent(
-                    event.orderId(),
-                    payment.getId(),
-                    event.userId(),
-                    event.userEmail(),
-                    event.totalAmount(),
-                    LocalDateTime.now()
-            ));
+            Payment saved = paymentRepository.save(payment);
+            outboxRepository.save(new OutboxEvent(
+                    "Payment", event.orderId(), "PaymentApproved", APPROVED_TOPIC,
+                    serialize(new PaymentApprovedEvent(
+                            event.orderId(),
+                            saved.getId(),
+                            event.userId(),
+                            event.userEmail(),
+                            event.totalAmount(),
+                            LocalDateTime.now()))));
         } else {
             payment.fail("Insufficient funds");
             paymentRepository.save(payment);
-            eventProducer.publishFailed(new PaymentFailedEvent(
-                    event.orderId(),
-                    event.userId(),
-                    "Insufficient funds",
-                    LocalDateTime.now()
-            ));
+            outboxRepository.save(new OutboxEvent(
+                    "Payment", event.orderId(), "PaymentFailed", FAILED_TOPIC,
+                    serialize(new PaymentFailedEvent(
+                            event.orderId(),
+                            event.userId(),
+                            "Insufficient funds",
+                            LocalDateTime.now()))));
+        }
+    }
+
+    private String serialize(Object event) {
+        try {
+            return objectMapper.writeValueAsString(event);
+        } catch (JsonProcessingException ex) {
+            // An event we cannot serialize is a programming error; failing here rolls the
+            // payment back rather than committing one that order-service will never hear about.
+            throw new IllegalStateException("Could not serialize payment event", ex);
         }
     }
 

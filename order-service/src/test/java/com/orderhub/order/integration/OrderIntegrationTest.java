@@ -6,6 +6,7 @@ import com.orderhub.order.dto.OrderItemRequest;
 import com.orderhub.order.dto.OrderResponse;
 import com.orderhub.order.entity.OrderStatus;
 import com.orderhub.order.event.PaymentApprovedEvent;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -56,7 +57,10 @@ class OrderIntegrationTest {
     TestRestTemplate restTemplate;
 
     @Autowired
-    KafkaTemplate<String, Object> kafkaTemplate;
+    KafkaTemplate<String, String> kafkaTemplate;
+
+    @Autowired
+    ObjectMapper objectMapper;
 
     @Test
     void shouldCreateOrderSuccessfully() {
@@ -173,7 +177,7 @@ class OrderIntegrationTest {
     }
 
     @Test
-    void shouldConfirmOrderWhenPaymentApprovedEventReceived() {
+    void shouldConfirmOrderWhenPaymentApprovedEventReceived() throws Exception {
         UUID productId = UUID.randomUUID();
         when(catalogClient.getProduct(any()))
                 .thenReturn(new CatalogClient.ProductResponse(productId, "Pizza", new BigDecimal("30.00"), true));
@@ -188,10 +192,12 @@ class OrderIntegrationTest {
         assertThat(created).isNotNull();
         UUID orderId = created.id();
 
-        // Simulate payment-service publishing an approval; the Saga consumer must confirm the order.
-        kafkaTemplate.send("payment.approved", orderId.toString(), new PaymentApprovedEvent(
-                orderId, UUID.randomUUID(), UUID.randomUUID(), "customer@example.com",
-                new BigDecimal("30.00"), LocalDateTime.now()));
+        // Simulate payment-service publishing an approval; the Saga consumer must confirm the
+        // order. Payloads go on the wire pre-serialized, exactly as the outbox relay sends them.
+        kafkaTemplate.send("payment.approved", orderId.toString(),
+                objectMapper.writeValueAsString(new PaymentApprovedEvent(
+                        orderId, UUID.randomUUID(), UUID.randomUUID(), "customer@example.com",
+                        new BigDecimal("30.00"), LocalDateTime.now())));
 
         await().atMost(15, TimeUnit.SECONDS).untilAsserted(() -> {
             OrderResponse fetched = restTemplate.exchange(
