@@ -40,11 +40,13 @@ class JwtAuthenticationFilterTest {
     void shouldLetPublicAuthPathThroughWithoutToken() {
         MockServerWebExchange exchange = MockServerWebExchange.from(
                 MockServerHttpRequest.post("/auth/login").build());
-        when(chain.filter(exchange)).thenReturn(Mono.empty());
+        // Matched with any(): the filter always forwards a mutated exchange — inbound identity
+        // headers are stripped even here — so it is never the same instance it received.
+        when(chain.filter(any())).thenReturn(Mono.empty());
 
         filter.filter(exchange, chain).block();
 
-        verify(chain).filter(exchange);
+        verify(chain).filter(any());
     }
 
     @Test
@@ -69,6 +71,50 @@ class JwtAuthenticationFilterTest {
 
         assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
         verify(chain, never()).filter(any());
+    }
+
+    @Test
+    void shouldStripAForgedIdentityHeaderOnAPublicPath() {
+        // A public route is forwarded untouched, so if the stripping happened after the
+        // public-path check a client could set X-User-Id here and have it reach a service.
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.post("/auth/login")
+                        .header("X-User-Id", UUID.randomUUID().toString())
+                        .header("X-User-Role", "ADMIN")
+                        .build());
+
+        var captor = org.mockito.ArgumentCaptor.forClass(ServerWebExchange.class);
+        when(chain.filter(captor.capture())).thenReturn(Mono.empty());
+
+        filter.filter(exchange, chain).block();
+
+        HttpHeaders forwarded = captor.getValue().getRequest().getHeaders();
+        assertThat(forwarded.getFirst("X-User-Id")).isNull();
+        assertThat(forwarded.getFirst("X-User-Role")).isNull();
+    }
+
+    @Test
+    void shouldOverrideAForgedIdentityHeaderWithTheTokensOwn() {
+        UUID realUser = UUID.randomUUID();
+        UUID victim = UUID.randomUUID();
+        String token = validToken(realUser, "user@example.com", "USER");
+
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/v1/orders/my")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        // Attacker presents their own valid token but claims to be someone else.
+                        .header("X-User-Id", victim.toString())
+                        .header("X-User-Role", "ADMIN")
+                        .build());
+
+        var captor = org.mockito.ArgumentCaptor.forClass(ServerWebExchange.class);
+        when(chain.filter(captor.capture())).thenReturn(Mono.empty());
+
+        filter.filter(exchange, chain).block();
+
+        HttpHeaders forwarded = captor.getValue().getRequest().getHeaders();
+        assertThat(forwarded.get("X-User-Id")).containsExactly(realUser.toString());
+        assertThat(forwarded.get("X-User-Role")).containsExactly("USER");
     }
 
     @Test

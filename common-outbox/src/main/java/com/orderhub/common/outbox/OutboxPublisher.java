@@ -12,11 +12,36 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 
 /**
- * Relays committed outbox rows to Kafka.
+ * Relays committed outbox rows to Kafka — the "publish" half of the transactional outbox.
  *
- * <p>Delivery is at-least-once by construction: the send may succeed and the transaction that
- * marks the row published may still fail, in which case the event is sent again on the next
- * tick. Consumers are written to tolerate that — see the duplicate guards in the saga handlers.
+ * <p>The business transaction never talks to Kafka; it only appends a row (see
+ * {@link OutboxRecorder}). This runs afterwards, on a timer, and does the actual sending:
+ *
+ * <pre>
+ * every 500 ms, in one transaction:
+ *   claim up to N unpublished rows, oldest first, FOR UPDATE SKIP LOCKED
+ *   for each: send to Kafka, wait for the broker's ack, stamp published_at
+ * </pre>
+ *
+ * <p>Three decisions in that loop are worth understanding, because each one is a bug if
+ * reversed:
+ *
+ * <ul>
+ *   <li><b>Claim with {@code SKIP LOCKED}</b> — rows a sibling replica is already working on
+ *       are stepped over rather than waited for. Without it, two instances either serialise
+ *       behind each other or publish the same event twice.</li>
+ *   <li><b>Send, then mark</b> — never the reverse. Marking first would lose the event outright
+ *       if the broker were down. Marking second means a crash between the two re-sends it,
+ *       which is why delivery here is <b>at-least-once, not exactly-once</b>. That is a
+ *       deliberate trade: duplicates are survivable, silent loss is not. The consumers carry
+ *       the matching duplicate guards.</li>
+ *   <li><b>Stop at the first failure</b> — the batch is ordered oldest-first, so skipping a
+ *       failed row and publishing the next one could deliver a later event for the same
+ *       aggregate before an earlier one.</li>
+ * </ul>
+ *
+ * <p>The whole batch shares one transaction, so the claimed rows stay locked until it commits.
+ * That bounds how long a stuck broker can hold them: keep {@code outbox.batch-size} modest.
  */
 @Component
 public class OutboxPublisher {
