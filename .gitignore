@@ -39,6 +39,9 @@ initial.txt
 CLAUDE.md
 ENTREVISTA_ORDERHUB.txt
 
+# Personal study notes — never committed
+estudos/
+
 # The Pact contract the provider verifies now lands in payment-service/target/pacts, which
 # the `target/` rule above already covers — so `mvn clean` removes it and a stale local copy
 # can no longer hide a broken contract flow.
