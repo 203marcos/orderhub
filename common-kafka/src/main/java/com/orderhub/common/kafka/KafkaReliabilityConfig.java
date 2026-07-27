@@ -51,10 +51,8 @@ public class KafkaReliabilityConfig {
     @Bean
     @ConditionalOnMissingBean(DefaultErrorHandler.class)
     public DefaultErrorHandler kafkaErrorHandler(KafkaTemplate<String, String> kafkaTemplate) {
-        DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(
-                kafkaTemplate,
-                // -1 lets the partitioner choose: the DLT may have fewer partitions than the source.
-                (record, exception) -> new TopicPartition(record.topic() + ".dlt", -1));
+        DeadLetterPublishingRecoverer recoverer =
+                new DeadLetterPublishingRecoverer(kafkaTemplate, new DeadLetterTopicResolver());
 
         return new DefaultErrorHandler(recoverer, new FixedBackOff(RETRY_INTERVAL_MS, RETRY_ATTEMPTS));
     }
