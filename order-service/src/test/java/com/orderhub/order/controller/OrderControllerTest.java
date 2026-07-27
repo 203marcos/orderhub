@@ -22,6 +22,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.IntStream;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -63,6 +64,14 @@ class OrderControllerTest {
         return objectMapper.writeValueAsString(
                 Map.of("items", List.of(
                         Map.of("productId", UUID.randomUUID().toString(), "quantity", quantity))));
+    }
+
+    private String bodyWithItemCount(int itemCount) throws Exception {
+        List<Map<String, Object>> items = IntStream.range(0, itemCount)
+                .mapToObj(i -> Map.<String, Object>of(
+                        "productId", UUID.randomUUID().toString(), "quantity", 1))
+                .toList();
+        return objectMapper.writeValueAsString(Map.of("items", items));
     }
 
     @Nested
@@ -112,6 +121,67 @@ class OrderControllerTest {
                     .andExpect(status().isBadRequest());
 
             verifyNoInteractions(orderService);
+        }
+
+        @ParameterizedTest(name = "quantity {0}")
+        @ValueSource(ints = {101, 1000})
+        @DisplayName("returns 400 for a quantity above the maximum")
+        void shouldRejectExcessiveQuantities(int quantity) throws Exception {
+            // Without a ceiling, a single line item could be used to build an arbitrarily large
+            // order — a lever for abuse (stock exhaustion, runaway totals) rather than a normal
+            // customer order.
+            mockMvc.perform(post("/api/v1/orders")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .header("X-User-Id", userId)
+                            .header("X-User-Email", "customer@example.com")
+                            .content(bodyWithOneItem(quantity)))
+                    .andExpect(status().isBadRequest());
+
+            verifyNoInteractions(orderService);
+        }
+
+        @Test
+        @DisplayName("accepts a quantity at the maximum")
+        void shouldAcceptTheMaximumQuantity() throws Exception {
+            when(orderService.createOrder(any(), eq(userId), eq("customer@example.com")))
+                    .thenReturn(anOrder());
+
+            mockMvc.perform(post("/api/v1/orders")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .header("X-User-Id", userId)
+                            .header("X-User-Email", "customer@example.com")
+                            .content(bodyWithOneItem(100)))
+                    .andExpect(status().isCreated());
+        }
+
+        @Test
+        @DisplayName("returns 400 for an order with more than 50 items")
+        void shouldRejectTooManyItems() throws Exception {
+            // The client dictates quantity per item and item count; unbounded either way lets a
+            // single request force pricing calls to catalog-service for as many products as it
+            // likes.
+            mockMvc.perform(post("/api/v1/orders")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .header("X-User-Id", userId)
+                            .header("X-User-Email", "customer@example.com")
+                            .content(bodyWithItemCount(51)))
+                    .andExpect(status().isBadRequest());
+
+            verifyNoInteractions(orderService);
+        }
+
+        @Test
+        @DisplayName("accepts an order with exactly 50 items")
+        void shouldAcceptTheMaximumItemCount() throws Exception {
+            when(orderService.createOrder(any(), eq(userId), eq("customer@example.com")))
+                    .thenReturn(anOrder());
+
+            mockMvc.perform(post("/api/v1/orders")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .header("X-User-Id", userId)
+                            .header("X-User-Email", "customer@example.com")
+                            .content(bodyWithItemCount(50)))
+                    .andExpect(status().isCreated());
         }
 
         @Test
