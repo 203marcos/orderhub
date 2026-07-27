@@ -1,21 +1,24 @@
 package com.orderhub.order.service;
 
+import com.orderhub.common.outbox.OutboxRecorder;
 import com.orderhub.order.client.CatalogClient;
 import com.orderhub.order.client.PaymentClient;
 import com.orderhub.order.dto.CreateOrderRequest;
 import com.orderhub.order.dto.OrderItemRequest;
 import com.orderhub.order.dto.OrderResponse;
 import com.orderhub.order.entity.Order;
-import com.orderhub.order.entity.OrderItem;
 import com.orderhub.order.entity.OrderStatus;
+import com.orderhub.order.event.OrderCreatedEvent;
 import com.orderhub.order.exception.OrderNotFoundException;
 import com.orderhub.order.exception.ProductUnavailableException;
-import com.orderhub.common.outbox.OutboxRecorder;
-import com.orderhub.order.event.OrderCreatedEvent;
 import com.orderhub.order.repository.OrderRepository;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -29,9 +32,13 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
+@DisplayName("OrderService")
 class OrderServiceTest {
 
     @Mock OrderRepository orderRepository;
@@ -42,193 +49,228 @@ class OrderServiceTest {
     @InjectMocks OrderService orderService;
 
     private UUID userId;
+    private UUID orderId;
     private String userEmail;
     private UUID productId;
 
     @BeforeEach
     void setUp() {
         userId = UUID.randomUUID();
+        orderId = UUID.randomUUID();
         userEmail = "user@example.com";
         productId = UUID.randomUUID();
     }
 
-    @Test
-    void shouldCreateOrderUsingCatalogPrice() {
-        CreateOrderRequest request = new CreateOrderRequest(List.of(
-                new OrderItemRequest(productId, 2)
-        ));
+    // ---------------------------------------------------------------- helpers
 
-        when(catalogClient.getProduct(productId))
-                .thenReturn(new CatalogClient.ProductResponse(productId, "Product A", new BigDecimal("29.99"), true));
-        when(orderRepository.save(any(Order.class))).thenAnswer(inv -> inv.getArgument(0));
-
-        OrderResponse response = orderService.createOrder(request, userId, userEmail);
-
-        assertThat(response.userId()).isEqualTo(userId);
-        // Total is computed server-side from the catalog price (29.99 * 2), never from the client.
-        assertThat(response.totalAmount()).isEqualByComparingTo(new BigDecimal("59.98"));
-        assertThat(response.items()).singleElement()
-                .satisfies(item -> assertThat(item.price()).isEqualByComparingTo(new BigDecimal("29.99")));
-        verify(orderRepository).save(any(Order.class));
-
-        // The event is staged in the outbox inside the same transaction, not sent to Kafka here.
-        ArgumentCaptor<OrderCreatedEvent> captor = ArgumentCaptor.forClass(OrderCreatedEvent.class);
-        verify(outboxRecorder).record(captor.capture());
-        OrderCreatedEvent staged = captor.getValue();
-        assertThat(staged.topic()).isEqualTo("order.created");
-        assertThat(staged.eventType()).isEqualTo("OrderCreated");
-        assertThat(staged.totalAmount()).isEqualByComparingTo(new BigDecimal("59.98"));
-        assertThat(staged.items()).singleElement()
-                .satisfies(item -> assertThat(item.productName()).isEqualTo("Product A"));
+    private Order orderOwnedBy(UUID owner) {
+        return new Order(owner, "owner@example.com", new BigDecimal("50.00"));
     }
 
-    @Test
-    void shouldRejectUnavailableProduct() {
-        CreateOrderRequest request = new CreateOrderRequest(List.of(
-                new OrderItemRequest(productId, 1)
-        ));
-        when(catalogClient.getProduct(productId))
-                .thenReturn(new CatalogClient.ProductResponse(productId, "Product A", new BigDecimal("29.99"), false));
-
-        assertThatThrownBy(() -> orderService.createOrder(request, userId, userEmail))
-                .isInstanceOf(ProductUnavailableException.class);
-        verify(orderRepository, never()).save(any());
-        verifyNoInteractions(outboxRecorder);
-    }
-
-    @Test
-    void shouldGetOrderById() {
-        UUID orderId = UUID.randomUUID();
-        Order order = new Order(userId, userEmail, new BigDecimal("50.00"));
+    private void givenStoredOrder(Order order) {
         when(orderRepository.findById(orderId)).thenReturn(Optional.of(order));
-
-        OrderResponse response = orderService.getOrder(orderId, userId);
-
-        assertThat(response.userId()).isEqualTo(userId);
     }
 
-    @Test
-    void shouldThrowWhenOrderNotFound() {
-        UUID orderId = UUID.randomUUID();
+    private void givenNoStoredOrder() {
         when(orderRepository.findById(orderId)).thenReturn(Optional.empty());
-
-        assertThatThrownBy(() -> orderService.getOrder(orderId, userId))
-                .isInstanceOf(OrderNotFoundException.class);
     }
 
-    @Test
-    void shouldHideOrderOwnedBySomeoneElse() {
-        UUID orderId = UUID.randomUUID();
-        Order someoneElsesOrder = new Order(UUID.randomUUID(), "other@example.com", new BigDecimal("50.00"));
-        when(orderRepository.findById(orderId)).thenReturn(Optional.of(someoneElsesOrder));
-
-        // Reported as "not found", not "forbidden", so ids cannot be enumerated.
-        assertThatThrownBy(() -> orderService.getOrder(orderId, userId))
-                .isInstanceOf(OrderNotFoundException.class);
+    private void givenCatalogOffers(String name, String price, boolean available) {
+        when(catalogClient.getProduct(productId)).thenReturn(
+                new CatalogClient.ProductResponse(productId, name, new BigDecimal(price), available));
     }
 
-    @Test
-    void shouldGetOrderPayment() {
-        UUID orderId = UUID.randomUUID();
-        Order order = new Order(userId, userEmail, new BigDecimal("59.98"));
-        when(orderRepository.findById(orderId)).thenReturn(Optional.of(order));
-        PaymentClient.PaymentInfo info = new PaymentClient.PaymentInfo(
-                UUID.randomUUID(), orderId, userId, new BigDecimal("59.98"), "APPROVED");
-        when(paymentClient.getPaymentByOrder(orderId, userId)).thenReturn(info);
-
-        PaymentClient.PaymentInfo result = orderService.getOrderPayment(orderId, userId);
-
-        assertThat(result.status()).isEqualTo("APPROVED");
-        assertThat(result.amount()).isEqualByComparingTo("59.98");
+    private CreateOrderRequest requestFor(int quantity) {
+        return new CreateOrderRequest(List.of(new OrderItemRequest(productId, quantity)));
     }
 
-    @Test
-    void shouldThrowWhenGettingPaymentForUnknownOrder() {
-        UUID orderId = UUID.randomUUID();
-        when(orderRepository.findById(orderId)).thenReturn(Optional.empty());
+    // ---------------------------------------------------------------- tests
 
-        assertThatThrownBy(() -> orderService.getOrderPayment(orderId, userId))
-                .isInstanceOf(OrderNotFoundException.class);
+    @Nested
+    @DisplayName("when placing an order")
+    class PlacingAnOrder {
+
+        @Test
+        @DisplayName("prices the order from the catalog, never from the client")
+        void shouldPriceFromTheCatalog() {
+            givenCatalogOffers("Product A", "29.99", true);
+            when(orderRepository.save(any(Order.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            OrderResponse response = orderService.createOrder(requestFor(2), userId, userEmail);
+
+            // A client that posts its own price must not be able to influence the total.
+            assertThat(response.totalAmount()).isEqualByComparingTo(new BigDecimal("59.98"));
+            assertThat(response.items()).singleElement()
+                    .satisfies(item -> assertThat(item.price()).isEqualByComparingTo(new BigDecimal("29.99")));
+        }
+
+        @Test
+        @DisplayName("stages OrderCreated in the outbox instead of sending it to Kafka")
+        void shouldStageTheEventInTheOutbox() {
+            givenCatalogOffers("Product A", "29.99", true);
+            when(orderRepository.save(any(Order.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            orderService.createOrder(requestFor(2), userId, userEmail);
+
+            ArgumentCaptor<OrderCreatedEvent> captor = ArgumentCaptor.forClass(OrderCreatedEvent.class);
+            verify(outboxRecorder).record(captor.capture());
+            OrderCreatedEvent staged = captor.getValue();
+            assertThat(staged.topic()).isEqualTo("order.created");
+            assertThat(staged.totalAmount()).isEqualByComparingTo(new BigDecimal("59.98"));
+        }
+
+        @Test
+        @DisplayName("rejects an unavailable product without saving or staging anything")
+        void shouldRejectAnUnavailableProduct() {
+            givenCatalogOffers("Product A", "29.99", false);
+
+            assertThatThrownBy(() -> orderService.createOrder(requestFor(1), userId, userEmail))
+                    .isInstanceOf(ProductUnavailableException.class);
+
+            // Nothing may be left behind: a staged event for a rolled-back order would start
+            // a Saga for something that never existed.
+            verify(orderRepository, never()).save(any());
+            verifyNoInteractions(outboxRecorder);
+        }
     }
 
-    @Test
-    void shouldNotCallPaymentServiceForAnotherUsersOrder() {
-        UUID orderId = UUID.randomUUID();
-        Order someoneElsesOrder = new Order(UUID.randomUUID(), "other@example.com", new BigDecimal("50.00"));
-        when(orderRepository.findById(orderId)).thenReturn(Optional.of(someoneElsesOrder));
+    @Nested
+    @DisplayName("when reading an order")
+    class ReadingAnOrder {
 
-        assertThatThrownBy(() -> orderService.getOrderPayment(orderId, userId))
-                .isInstanceOf(OrderNotFoundException.class);
-        verifyNoInteractions(paymentClient);
+        @Test
+        @DisplayName("returns the order to its owner")
+        void shouldReturnTheOrderToItsOwner() {
+            givenStoredOrder(orderOwnedBy(userId));
+
+            assertThat(orderService.getOrder(orderId, userId).userId()).isEqualTo(userId);
+        }
+
+        @Test
+        @DisplayName("reports an unknown order as not found")
+        void shouldReportUnknownOrderAsNotFound() {
+            givenNoStoredOrder();
+
+            assertThatThrownBy(() -> orderService.getOrder(orderId, userId))
+                    .isInstanceOf(OrderNotFoundException.class);
+        }
+
+        @Test
+        @DisplayName("reports someone else's order as not found, not forbidden")
+        void shouldHideAnotherUsersOrder() {
+            givenStoredOrder(orderOwnedBy(UUID.randomUUID()));
+
+            // 404 rather than 403: a 403 would confirm the id exists, turning the endpoint
+            // into an enumeration oracle (OWASP API1).
+            assertThatThrownBy(() -> orderService.getOrder(orderId, userId))
+                    .isInstanceOf(OrderNotFoundException.class);
+        }
+
+        @Test
+        @DisplayName("lists only the caller's own orders")
+        void shouldListTheCallersOrders() {
+            when(orderRepository.findByUserId(userId)).thenReturn(
+                    List.of(orderOwnedBy(userId), orderOwnedBy(userId)));
+
+            assertThat(orderService.getOrdersByUser(userId)).hasSize(2);
+        }
     }
 
-    @Test
-    void shouldGetOrdersByUser() {
-        Order order1 = new Order(userId, userEmail, new BigDecimal("10.00"));
-        Order order2 = new Order(userId, userEmail, new BigDecimal("20.00"));
-        when(orderRepository.findByUserId(userId)).thenReturn(List.of(order1, order2));
+    @Nested
+    @DisplayName("when reading an order's payment")
+    class ReadingAPayment {
 
-        List<OrderResponse> orders = orderService.getOrdersByUser(userId);
+        @Test
+        @DisplayName("fetches it from payment-service for the owner")
+        void shouldFetchThePaymentForTheOwner() {
+            givenStoredOrder(orderOwnedBy(userId));
+            when(paymentClient.getPaymentByOrder(orderId, userId)).thenReturn(
+                    new PaymentClient.PaymentInfo(
+                            UUID.randomUUID(), orderId, userId, new BigDecimal("59.98"), "APPROVED"));
 
-        assertThat(orders).hasSize(2);
+            PaymentClient.PaymentInfo result = orderService.getOrderPayment(orderId, userId);
+
+            assertThat(result.status()).isEqualTo("APPROVED");
+        }
+
+        @Test
+        @DisplayName("reports an unknown order as not found")
+        void shouldReportUnknownOrderAsNotFound() {
+            givenNoStoredOrder();
+
+            assertThatThrownBy(() -> orderService.getOrderPayment(orderId, userId))
+                    .isInstanceOf(OrderNotFoundException.class);
+        }
+
+        @Test
+        @DisplayName("does not call payment-service for someone else's order")
+        void shouldNotCallPaymentServiceForAnotherUsersOrder() {
+            givenStoredOrder(orderOwnedBy(UUID.randomUUID()));
+
+            assertThatThrownBy(() -> orderService.getOrderPayment(orderId, userId))
+                    .isInstanceOf(OrderNotFoundException.class);
+
+            // The ownership check must happen before the call, not after: otherwise the
+            // request still leaks that the order exists, and costs a downstream round trip.
+            verifyNoInteractions(paymentClient);
+        }
     }
 
-    @Test
-    void shouldConfirmOrder() {
-        UUID orderId = UUID.randomUUID();
-        Order order = new Order(userId, userEmail, new BigDecimal("50.00"));
-        when(orderRepository.findById(orderId)).thenReturn(Optional.of(order));
+    @Nested
+    @DisplayName("when a payment outcome arrives")
+    class ApplyingASagaOutcome {
 
-        orderService.confirmOrder(orderId);
+        @Test
+        @DisplayName("confirms a pending order")
+        void shouldConfirmAPendingOrder() {
+            Order order = orderOwnedBy(userId);
+            givenStoredOrder(order);
 
-        assertThat(order.getStatus()).isEqualTo(OrderStatus.CONFIRMED);
-        verify(orderRepository).save(order);
-    }
+            orderService.confirmOrder(orderId);
 
-    @Test
-    void shouldFailOrder() {
-        UUID orderId = UUID.randomUUID();
-        Order order = new Order(userId, userEmail, new BigDecimal("50.00"));
-        when(orderRepository.findById(orderId)).thenReturn(Optional.of(order));
+            assertThat(order.getStatus()).isEqualTo(OrderStatus.CONFIRMED);
+            verify(orderRepository).save(order);
+        }
 
-        orderService.failOrder(orderId);
+        @Test
+        @DisplayName("fails a pending order")
+        void shouldFailAPendingOrder() {
+            Order order = orderOwnedBy(userId);
+            givenStoredOrder(order);
 
-        assertThat(order.getStatus()).isEqualTo(OrderStatus.PAYMENT_FAILED);
-    }
+            orderService.failOrder(orderId);
 
-    @Test
-    void shouldIgnoreRedeliveredApprovalForAnAlreadySettledOrder() {
-        UUID orderId = UUID.randomUUID();
-        Order order = new Order(userId, userEmail, new BigDecimal("50.00"));
-        order.setStatus(OrderStatus.CONFIRMED);
-        when(orderRepository.findById(orderId)).thenReturn(Optional.of(order));
+            assertThat(order.getStatus()).isEqualTo(OrderStatus.PAYMENT_FAILED);
+        }
 
-        orderService.confirmOrder(orderId);
+        /**
+         * Kafka is at-least-once and gives no ordering guarantee <em>between</em> the
+         * payment.approved and payment.failed topics. Whatever an order has already settled
+         * as, no redelivered or late event may move it — so this is checked for every
+         * non-pending status rather than just the one that happened to be written first.
+         */
+        @ParameterizedTest(name = "leaves an order that is already {0} untouched")
+        @EnumSource(value = OrderStatus.class, names = "PENDING", mode = EnumSource.Mode.EXCLUDE)
+        @DisplayName("ignores an outcome for an order that already settled")
+        void shouldIgnoreOutcomesForSettledOrders(OrderStatus settled) {
+            Order order = orderOwnedBy(userId);
+            order.setStatus(settled);
+            givenStoredOrder(order);
 
-        assertThat(order.getStatus()).isEqualTo(OrderStatus.CONFIRMED);
-        verify(orderRepository, never()).save(any());
-    }
+            orderService.confirmOrder(orderId);
+            orderService.failOrder(orderId);
 
-    @Test
-    void shouldNotLetALateFailureOverrideAConfirmedOrder() {
-        UUID orderId = UUID.randomUUID();
-        Order order = new Order(userId, userEmail, new BigDecimal("50.00"));
-        order.setStatus(OrderStatus.CONFIRMED);
-        when(orderRepository.findById(orderId)).thenReturn(Optional.of(order));
+            assertThat(order.getStatus()).isEqualTo(settled);
+            verify(orderRepository, never()).save(any());
+        }
 
-        // payment.approved and payment.failed are separate topics with no ordering guarantee.
-        orderService.failOrder(orderId);
+        @Test
+        @DisplayName("reports an outcome for an unknown order as not found")
+        void shouldReportUnknownOrderAsNotFound() {
+            givenNoStoredOrder();
 
-        assertThat(order.getStatus()).isEqualTo(OrderStatus.CONFIRMED);
-        verify(orderRepository, never()).save(any());
-    }
-
-    @Test
-    void shouldThrowWhenConfirmingNonExistentOrder() {
-        UUID orderId = UUID.randomUUID();
-        when(orderRepository.findById(orderId)).thenReturn(Optional.empty());
-
-        assertThatThrownBy(() -> orderService.confirmOrder(orderId))
-                .isInstanceOf(OrderNotFoundException.class);
+            assertThatThrownBy(() -> orderService.confirmOrder(orderId))
+                    .isInstanceOf(OrderNotFoundException.class);
+        }
     }
 }
