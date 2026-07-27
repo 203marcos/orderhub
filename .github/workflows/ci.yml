@@ -41,12 +41,18 @@ jobs:
           cache: maven
 
       # Fast fail on any compilation error before spending time on containers.
-      - name: Compile all modules
-        run: mvn -B clean package -DskipTests --no-transfer-progress
+      #
+      # `install`, not `package`: the services depend on the common-kafka and common-outbox
+      # modules built here. A `package` leaves them in target/ only, so the later per-module
+      # commands would look for com.orderhub:common-outbox on Maven Central and fail.
+      - name: Build and install all modules
+        run: mvn -B clean install -DskipTests --no-transfer-progress
 
+      # `-am` (--also-make) keeps each command self-contained by pulling the modules these
+      # depend on into the reactor, so this step does not rely on the one above having run.
       # Consumer (order-service) generates the Pact contract into target/pacts.
       - name: Test gateway, auth, catalog, order (unit + integration)
-        run: mvn -B verify -pl api-gateway,auth-service,catalog-service,order-service -DexcludedGroups= --no-transfer-progress
+        run: mvn -B verify -pl api-gateway,auth-service,catalog-service,order-service -am -DexcludedGroups= --no-transfer-progress
 
       # The provider must verify the contract the consumer just produced.
       - name: Publish Pact contract to the provider
@@ -55,7 +61,7 @@ jobs:
           cp order-service/target/pacts/*.json payment-service/pacts/
 
       - name: Test payment, notification (unit + integration + Pact provider)
-        run: mvn -B verify -pl payment-service,notification-service -DexcludedGroups= --no-transfer-progress
+        run: mvn -B verify -pl payment-service,notification-service -am -DexcludedGroups= --no-transfer-progress
 
       - name: Upload JaCoCo coverage
         if: always()
