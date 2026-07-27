@@ -15,6 +15,11 @@
 
     <dependencies>
         <dependency>
+            <groupId>com.orderhub</groupId>
+            <artifactId>common-outbox</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>

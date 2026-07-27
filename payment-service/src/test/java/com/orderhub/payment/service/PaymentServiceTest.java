@@ -4,18 +4,19 @@ import com.orderhub.payment.dto.PaymentResponse;
 import com.orderhub.payment.entity.Payment;
 import com.orderhub.payment.entity.PaymentStatus;
 import com.orderhub.payment.event.OrderCreatedEvent;
+import com.orderhub.common.outbox.DomainEvent;
+import com.orderhub.common.outbox.OutboxRecorder;
 import com.orderhub.payment.exception.PaymentNotFoundException;
-import com.orderhub.payment.outbox.OutboxEvent;
-import com.orderhub.payment.outbox.OutboxRepository;
+import com.orderhub.payment.event.PaymentFailedEvent;
+import com.orderhub.payment.gateway.PaymentDecision;
+import com.orderhub.payment.gateway.PaymentGateway;
 import com.orderhub.payment.repository.PaymentRepository;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
-import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
@@ -33,10 +34,8 @@ import static org.mockito.Mockito.*;
 class PaymentServiceTest {
 
     @Mock PaymentRepository paymentRepository;
-    @Mock OutboxRepository outboxRepository;
-
-    // A real mapper: the point of the outbox row is that it carries a genuine serialized payload.
-    @Spy ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+    @Mock OutboxRecorder outboxRecorder;
+    @Mock PaymentGateway paymentGateway;
 
     @InjectMocks PaymentService paymentService;
 
@@ -52,40 +51,44 @@ class PaymentServiceTest {
     }
 
     @Test
-    void shouldApprovePaymentForNormalOrder() {
-        OrderCreatedEvent event = new OrderCreatedEvent(
-                orderId, userId, userEmail, List.of(), new BigDecimal("99.99"), LocalDateTime.now()
-        );
+    void shouldStagePaymentApprovedWhenTheGatewayAuthorises() {
+        OrderCreatedEvent event = orderFor(new BigDecimal("99.99"));
         Payment savedPayment = new Payment(orderId, userId, userEmail, new BigDecimal("99.99"));
         savedPayment.approve();
         when(paymentRepository.save(any())).thenReturn(savedPayment);
+        when(paymentGateway.authorize(orderId, new BigDecimal("99.99")))
+                .thenReturn(PaymentDecision.approve());
 
         paymentService.processPayment(event);
 
         verify(paymentRepository).save(any());
-        assertThat(stagedEvent().getTopic()).isEqualTo("payment.approved");
+        assertThat(stagedEvent().topic()).isEqualTo("payment.approved");
     }
 
     @Test
-    void shouldFailPaymentForHighValueOrder() {
-        OrderCreatedEvent event = new OrderCreatedEvent(
-                orderId, userId, userEmail, List.of(), new BigDecimal("15000.00"), LocalDateTime.now()
-        );
-        Payment savedPayment = new Payment(orderId, userId, userEmail, new BigDecimal("15000.00"));
-        savedPayment.fail("Insufficient funds");
-        when(paymentRepository.save(any())).thenReturn(savedPayment);
+    void shouldStagePaymentFailedWithTheGatewaysReasonWhenItDeclines() {
+        OrderCreatedEvent event = orderFor(new BigDecimal("15000.00"));
+        when(paymentRepository.save(any()))
+                .thenReturn(new Payment(orderId, userId, userEmail, new BigDecimal("15000.00")));
+        when(paymentGateway.authorize(orderId, new BigDecimal("15000.00")))
+                .thenReturn(PaymentDecision.decline("Card limit exceeded"));
 
         paymentService.processPayment(event);
 
-        OutboxEvent staged = stagedEvent();
-        assertThat(staged.getTopic()).isEqualTo("payment.failed");
-        assertThat(staged.getPayload()).contains("Insufficient funds");
+        DomainEvent staged = stagedEvent();
+        assertThat(staged.topic()).isEqualTo("payment.failed");
+        // The reason is the gateway's, not one this service invents.
+        assertThat(((PaymentFailedEvent) staged).reason()).isEqualTo("Card limit exceeded");
+    }
+
+    private OrderCreatedEvent orderFor(BigDecimal total) {
+        return new OrderCreatedEvent(orderId, userId, userEmail, List.of(), total, LocalDateTime.now());
     }
 
     /** The outcome is staged in the outbox inside the same transaction, not sent to Kafka here. */
-    private OutboxEvent stagedEvent() {
-        ArgumentCaptor<OutboxEvent> captor = ArgumentCaptor.forClass(OutboxEvent.class);
-        verify(outboxRepository).save(captor.capture());
+    private DomainEvent stagedEvent() {
+        ArgumentCaptor<DomainEvent> captor = ArgumentCaptor.forClass(DomainEvent.class);
+        verify(outboxRecorder).record(captor.capture());
         return captor.getValue();
     }
 
@@ -103,7 +106,7 @@ class PaymentServiceTest {
         paymentService.processPayment(event);
 
         verify(paymentRepository, never()).save(any());
-        verifyNoInteractions(outboxRepository);
+        verifyNoInteractions(outboxRecorder, paymentGateway);
     }
 
     @Test

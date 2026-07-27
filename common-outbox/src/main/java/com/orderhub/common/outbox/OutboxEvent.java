@@ -1,4 +1,4 @@
-package com.orderhub.payment.outbox;
+package com.orderhub.common.outbox;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;

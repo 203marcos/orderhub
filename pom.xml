@@ -19,6 +19,8 @@
     <description>Distributed order processing platform — portfolio microservices project</description>
 
     <modules>
+        <module>common-kafka</module>
+        <module>common-outbox</module>
         <module>api-gateway</module>
         <module>auth-service</module>
         <module>catalog-service</module>

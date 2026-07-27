@@ -1,4 +1,4 @@
-package com.orderhub.payment.outbox;
+package com.orderhub.common.outbox;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -30,7 +30,7 @@ class OutboxPublisherTest {
     }
 
     private static OutboxEvent pendingEvent(UUID aggregateId) {
-        return new OutboxEvent("Payment", aggregateId, "PaymentApproved", "payment.approved", "{\"orderId\":\"x\"}");
+        return new OutboxEvent("Order", aggregateId, "OrderCreated", "order.created", "{\"orderId\":\"x\"}");
     }
 
     @Test
@@ -38,7 +38,7 @@ class OutboxPublisherTest {
         OutboxEvent event = pendingEvent(UUID.randomUUID());
         when(outboxRepository.findByPublishedAtIsNullOrderByCreatedAtAsc(any(Limit.class)))
                 .thenReturn(List.of(event));
-        when(kafkaTemplate.send(eq("payment.approved"), eq(event.messageKey()), eq(event.getPayload())))
+        when(kafkaTemplate.send(eq("order.created"), eq(event.messageKey()), eq(event.getPayload())))
                 .thenReturn(CompletableFuture.completedFuture(null));
 
         publisher().publishPending();
@@ -47,7 +47,7 @@ class OutboxPublisherTest {
     }
 
     @Test
-    void shouldKeyMessagesByAggregateSoOrderIsPreservedPerPayment() {
+    void shouldKeyMessagesByAggregateSoOrderIsPreservedPerOrder() {
         UUID orderId = UUID.randomUUID();
         OutboxEvent event = pendingEvent(orderId);
         when(outboxRepository.findByPublishedAtIsNullOrderByCreatedAtAsc(any(Limit.class)))
@@ -57,7 +57,7 @@ class OutboxPublisherTest {
 
         publisher().publishPending();
 
-        verify(kafkaTemplate).send("payment.approved", orderId.toString(), event.getPayload());
+        verify(kafkaTemplate).send("order.created", orderId.toString(), event.getPayload());
     }
 
     @Test

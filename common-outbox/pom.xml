@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.orderhub</groupId>
+        <artifactId>orderhub</artifactId>
+        <version>1.0.0</version>
+    </parent>
+
+    <artifactId>common-outbox</artifactId>
+    <name>common-outbox</name>
+    <description>
+        The transactional outbox: staging domain events in the database inside the business
+        transaction, and relaying them to Kafka once committed. Depends on common-kafka, so it
+        is only for services that both publish events and own a database.
+
+        Deliberately free of domain types — a service's entities, DTOs and events stay in that
+        service, so this library never becomes a channel for one service to depend on another's
+        model. All it asks of a service's domain is the DomainEvent interface.
+    </description>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.orderhub</groupId>
+            <artifactId>common-kafka</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+        <!-- Used directly: OutboxRecorder serializes events, DomainEvent uses @JsonIgnore. -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+</project>

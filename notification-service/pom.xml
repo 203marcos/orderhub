@@ -14,6 +14,13 @@
     <name>notification-service</name>
 
     <dependencies>
+        <!-- Kafka reliability only: this service has no database, so it must not pull in
+             common-outbox, which does. -->
+        <dependency>
+            <groupId>com.orderhub</groupId>
+            <artifactId>common-kafka</artifactId>
+            <version>${project.version}</version>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>

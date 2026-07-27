@@ -10,17 +10,15 @@ import com.orderhub.order.entity.OrderItem;
 import com.orderhub.order.entity.OrderStatus;
 import com.orderhub.order.exception.OrderNotFoundException;
 import com.orderhub.order.exception.ProductUnavailableException;
-import com.orderhub.order.outbox.OutboxEvent;
-import com.orderhub.order.outbox.OutboxRepository;
+import com.orderhub.common.outbox.OutboxRecorder;
+import com.orderhub.order.event.OrderCreatedEvent;
 import com.orderhub.order.repository.OrderRepository;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
-import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
@@ -37,12 +35,9 @@ import static org.mockito.Mockito.*;
 class OrderServiceTest {
 
     @Mock OrderRepository orderRepository;
-    @Mock OutboxRepository outboxRepository;
+    @Mock OutboxRecorder outboxRecorder;
     @Mock CatalogClient catalogClient;
     @Mock PaymentClient paymentClient;
-
-    // A real mapper: the point of the outbox row is that it carries a genuine serialized payload.
-    @Spy ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
 
     @InjectMocks OrderService orderService;
 
@@ -77,13 +72,14 @@ class OrderServiceTest {
         verify(orderRepository).save(any(Order.class));
 
         // The event is staged in the outbox inside the same transaction, not sent to Kafka here.
-        ArgumentCaptor<OutboxEvent> captor = ArgumentCaptor.forClass(OutboxEvent.class);
-        verify(outboxRepository).save(captor.capture());
-        OutboxEvent staged = captor.getValue();
-        assertThat(staged.getTopic()).isEqualTo("order.created");
-        assertThat(staged.getEventType()).isEqualTo("OrderCreated");
-        assertThat(staged.getPayload()).contains("\"totalAmount\":59.98");
-        assertThat(staged.getPublishedAt()).isNull();
+        ArgumentCaptor<OrderCreatedEvent> captor = ArgumentCaptor.forClass(OrderCreatedEvent.class);
+        verify(outboxRecorder).record(captor.capture());
+        OrderCreatedEvent staged = captor.getValue();
+        assertThat(staged.topic()).isEqualTo("order.created");
+        assertThat(staged.eventType()).isEqualTo("OrderCreated");
+        assertThat(staged.totalAmount()).isEqualByComparingTo(new BigDecimal("59.98"));
+        assertThat(staged.items()).singleElement()
+                .satisfies(item -> assertThat(item.productName()).isEqualTo("Product A"));
     }
 
     @Test
@@ -97,7 +93,7 @@ class OrderServiceTest {
         assertThatThrownBy(() -> orderService.createOrder(request, userId, userEmail))
                 .isInstanceOf(ProductUnavailableException.class);
         verify(orderRepository, never()).save(any());
-        verify(outboxRepository, never()).save(any());
+        verifyNoInteractions(outboxRecorder);
     }
 
     @Test

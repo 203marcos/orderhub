@@ -1,4 +1,4 @@
-package com.orderhub.order.outbox;
+package com.orderhub.common.outbox;
 
 import jakarta.persistence.LockModeType;
 import jakarta.persistence.QueryHint;
