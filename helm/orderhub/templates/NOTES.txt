@@ -1,0 +1,25 @@
+OrderHub {{ .Chart.AppVersion }} deployed to namespace "{{ .Release.Namespace | default "orderhub" }}".
+
+This chart deploys the SIX application services (api-gateway, auth, catalog, order,
+payment, notification). It expects the following infrastructure to already exist in the
+cluster, reachable by these service names:
+
+  postgres-auth / postgres-catalog / postgres-order / postgres-payment   (PostgreSQL)
+  kafka:9092        (Apache Kafka)
+  redis:6379        (Redis)
+  jaeger:4317       (OpenTelemetry OTLP endpoint)
+  mailhog:1025      (dev SMTP)
+
+Provision them with managed services or the Bitnami charts. For a fully self-contained
+LOCAL environment (infra + services in one command), use docker-compose instead:
+
+  docker compose up -d --build
+
+Check the rollout:
+
+  kubectl get pods -n {{ .Release.Namespace | default "orderhub" }}
+
+Reach the gateway (Service "api-gateway", type {{ .Values.apiGateway.service.type | default "ClusterIP" }}):
+
+  kubectl port-forward -n {{ .Release.Namespace | default "orderhub" }} svc/api-gateway {{ .Values.apiGateway.port }}:{{ .Values.apiGateway.port }}
+  # then open http://localhost:{{ .Values.apiGateway.port }}

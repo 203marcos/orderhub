@@ -29,6 +29,8 @@ spec:
               value: mailhog
             - name: MAIL_PORT
               value: "1025"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://jaeger:4317
           readinessProbe:
             httpGet:
               path: /actuator/health

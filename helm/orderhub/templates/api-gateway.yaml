@@ -36,6 +36,8 @@ spec:
                 secretKeyRef:
                   name: orderhub-secrets
                   key: jwt-secret
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://jaeger:4317
           readinessProbe:
             httpGet:
               path: /actuator/health

@@ -53,14 +53,11 @@ notificationService:
   image: notification-service
   port: 8085
 
-kafka:
-  enabled: true
-
-redis:
-  enabled: true
-
-jaeger:
-  enabled: true
+# Infrastructure (PostgreSQL per service, Kafka, Redis, Jaeger, Mailhog) is expected to
+# already exist in the cluster — provision it with managed services or the official
+# Bitnami charts, using the service names the apps reference (postgres-<svc>, kafka,
+# redis, jaeger, mailhog). For a batteries-included LOCAL environment use docker-compose,
+# which bundles everything. See the chart NOTES and README for details.
 
 resources:
   requests:

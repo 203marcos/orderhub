@@ -37,6 +37,12 @@ spec:
                   key: db-password
             - name: KAFKA_SERVERS
               value: kafka:9092
+            - name: CATALOG_SERVICE_URL
+              value: http://catalog-service:{{ .Values.catalogService.port }}
+            - name: PAYMENT_SERVICE_URL
+              value: http://payment-service:{{ .Values.paymentService.port }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://jaeger:4317
           readinessProbe:
             httpGet:
               path: /actuator/health
