@@ -145,7 +145,11 @@ jobs:
   security-scan:
     name: Security Scan (Trivy)
     needs: test
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    # A custom `if:` replaces the implicit success() gate that `needs:` normally provides,
+    # so the test job's success has to be restated explicitly or this would run on red builds.
+    if: >-
+      needs.test.result == 'success' &&
+      (github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -165,7 +169,9 @@ jobs:
       - name: Populate the local Maven repository
         run: mvn -B -q dependency:go-offline --no-transfer-progress
 
-      # Gate: CRITICAL vulnerabilities fail the build outright.
+      # Gate: fixable CRITICAL vulnerabilities fail the build outright. `ignore-unfixed`
+      # keeps CVEs with no released fix (nothing any version bump can do) from permanently
+      # blocking every push — they still show up in the informational scan below.
       - name: Run Trivy filesystem scan (CRITICAL — build-blocking)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -174,6 +180,7 @@ jobs:
           format: 'table'
           exit-code: '1'
           severity: 'CRITICAL'
+          ignore-unfixed: true
 
       # Informational: HIGH vulnerabilities are surfaced in the logs for triage but never
       # fail the job. Runs even if the step above already reported CRITICAL findings, so a
@@ -251,7 +258,12 @@ jobs:
   publish-images:
     name: Build & Push Images (GHCR)
     needs: [ test, security-scan ]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # The custom `if:` drops the implicit success() gate — without the explicit result checks
+    # a red test or a CRITICAL CVE would still publish a broken image as `latest`.
+    if: >-
+      needs.test.result == 'success' &&
+      needs.security-scan.result == 'success' &&
+      github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:

@@ -37,6 +37,13 @@
         <springdoc.version>2.6.0</springdoc.version>
         <archunit.version>1.4.1</archunit.version>
         <logstash-logback-encoder.version>7.4</logstash-logback-encoder.version>
+        <!-- CVE overrides on top of Boot 3.4.1's managed versions — the Trivy gate blocks
+             CRITICAL findings. Tomcat 10.1.55 covers CVE-2025-24813/CVE-2026-41293;
+             Spring Security 6.5.9 covers CVE-2025-41232/CVE-2026-22732. Drop both
+             overrides when the Boot parent is upgraded past these versions. -->
+        <tomcat.version>10.1.55</tomcat.version>
+        <spring-security.version>6.5.9</spring-security.version>
+        <bouncycastle.version>1.84</bouncycastle.version>
         <!-- Test groups excluded by default (fast `mvn test`). Override with
              -DexcludedGroups= (empty) to also run @Tag("integration") Testcontainers tests. -->
         <excludedGroups>integration</excludedGroups>
@@ -57,6 +64,13 @@
                 <version>${testcontainers.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
+            </dependency>
+            <!-- Transitive only (Pact brings it into order-service, gateway pulls it too):
+                 pinned above 1.80.2 for CVE-2025-14813. -->
+            <dependency>
+                <groupId>org.bouncycastle</groupId>
+                <artifactId>bcprov-jdk18on</artifactId>
+                <version>${bouncycastle.version}</version>
             </dependency>
             <dependency>
                 <groupId>io.jsonwebtoken</groupId>
