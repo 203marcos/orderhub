@@ -38,9 +38,11 @@ class ClientFallbackTest {
     void paymentFallbackDegradesToUnknownStatus() {
         PaymentClient fallback = new PaymentClientFallback().create(new RuntimeException("timeout"));
 
-        PaymentClient.PaymentInfo info = fallback.getPaymentByOrder(id);
+        UUID userId = UUID.randomUUID();
+        PaymentClient.PaymentInfo info = fallback.getPaymentByOrder(id, userId);
 
         assertThat(info.orderId()).isEqualTo(id);
+        assertThat(info.userId()).isEqualTo(userId);
         assertThat(info.status()).isEqualTo("UNKNOWN");
     }
 

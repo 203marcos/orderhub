@@ -181,6 +181,10 @@ services:
       COLLECTOR_OTLP_ENABLED: "true"
 
   # ---------------------------------------------------------------- services
+  # Only the gateway binds a host port. The downstream services trust the identity
+  # headers (X-User-Id/Email/Role) that the gateway derives from the JWT, so exposing
+  # them on localhost would let anyone bypass authentication by forging those headers.
+  # They stay reachable to each other — and to Prometheus — over the compose network.
   api-gateway:
     build:
       context: .
@@ -206,8 +210,8 @@ services:
       context: .
       dockerfile: auth-service/Dockerfile
     container_name: orderhub-auth-service
-    ports:
-      - "8081:8081"
+    expose:
+      - "8081"
     environment:
       DB_URL: jdbc:postgresql://postgres-auth:5432/auth_db
       DB_USER: orderhub
@@ -229,8 +233,8 @@ services:
       context: .
       dockerfile: catalog-service/Dockerfile
     container_name: orderhub-catalog-service
-    ports:
-      - "8082:8082"
+    expose:
+      - "8082"
     environment:
       DB_URL: jdbc:postgresql://postgres-catalog:5432/catalog_db
       DB_USER: orderhub
@@ -255,8 +259,8 @@ services:
       context: .
       dockerfile: order-service/Dockerfile
     container_name: orderhub-order-service
-    ports:
-      - "8083:8083"
+    expose:
+      - "8083"
     environment:
       DB_URL: jdbc:postgresql://postgres-order:5432/order_db
       DB_USER: orderhub
@@ -282,8 +286,8 @@ services:
       context: .
       dockerfile: payment-service/Dockerfile
     container_name: orderhub-payment-service
-    ports:
-      - "8084:8084"
+    expose:
+      - "8084"
     environment:
       DB_URL: jdbc:postgresql://postgres-payment:5432/payment_db
       DB_USER: orderhub
@@ -307,8 +311,8 @@ services:
       context: .
       dockerfile: notification-service/Dockerfile
     container_name: orderhub-notification-service
-    ports:
-      - "8085:8085"
+    expose:
+      - "8085"
     environment:
       KAFKA_SERVERS: kafka:29092
       MAIL_HOST: mailhog

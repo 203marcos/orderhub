@@ -80,7 +80,7 @@ class PaymentServiceTest {
         Payment payment = new Payment(orderId, userId, userEmail, new BigDecimal("50.00"));
         when(paymentRepository.findByOrderId(orderId)).thenReturn(Optional.of(payment));
 
-        PaymentResponse response = paymentService.getByOrderId(orderId);
+        PaymentResponse response = paymentService.getByOrderId(orderId, userId);
 
         assertThat(response.orderId()).isEqualTo(orderId);
     }
@@ -91,7 +91,7 @@ class PaymentServiceTest {
         Payment payment = new Payment(orderId, userId, userEmail, new BigDecimal("50.00"));
         when(paymentRepository.findById(paymentId)).thenReturn(Optional.of(payment));
 
-        PaymentResponse response = paymentService.getById(paymentId);
+        PaymentResponse response = paymentService.getById(paymentId, userId);
 
         assertThat(response.userId()).isEqualTo(userId);
     }
@@ -100,7 +100,7 @@ class PaymentServiceTest {
     void shouldThrowWhenPaymentNotFoundByOrderId() {
         when(paymentRepository.findByOrderId(orderId)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> paymentService.getByOrderId(orderId))
+        assertThatThrownBy(() -> paymentService.getByOrderId(orderId, userId))
                 .isInstanceOf(PaymentNotFoundException.class);
     }
 
@@ -109,7 +109,17 @@ class PaymentServiceTest {
         UUID paymentId = UUID.randomUUID();
         when(paymentRepository.findById(paymentId)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> paymentService.getById(paymentId))
+        assertThatThrownBy(() -> paymentService.getById(paymentId, userId))
+                .isInstanceOf(PaymentNotFoundException.class);
+    }
+
+    @Test
+    void shouldHidePaymentOwnedBySomeoneElse() {
+        Payment payment = new Payment(orderId, UUID.randomUUID(), "other@example.com", new BigDecimal("50.00"));
+        when(paymentRepository.findByOrderId(orderId)).thenReturn(Optional.of(payment));
+
+        // Reported as "not found", not "forbidden", so ids cannot be enumerated.
+        assertThatThrownBy(() -> paymentService.getByOrderId(orderId, userId))
                 .isInstanceOf(PaymentNotFoundException.class);
     }
 }

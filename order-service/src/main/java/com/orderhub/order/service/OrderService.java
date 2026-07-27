@@ -56,8 +56,14 @@ public class OrderService {
         return OrderResponse.from(saved);
     }
 
-    public OrderResponse getOrder(UUID orderId) {
+    /**
+     * Reads an order the caller owns. An order belonging to someone else is reported as
+     * "not found" rather than "forbidden", so the endpoint cannot be used to probe which
+     * order ids exist (OWASP API1 — Broken Object Level Authorization).
+     */
+    public OrderResponse getOrder(UUID orderId, UUID userId) {
         return orderRepository.findById(orderId)
+                .filter(order -> order.getUserId().equals(userId))
                 .map(OrderResponse::from)
                 .orElseThrow(() -> new OrderNotFoundException(orderId));
     }
@@ -68,12 +74,12 @@ public class OrderService {
                 .toList();
     }
 
-    /** Fetches the payment detail for an order via a synchronous call to payment-service. */
-    public PaymentClient.PaymentInfo getOrderPayment(UUID orderId) {
-        if (!orderRepository.existsById(orderId)) {
-            throw new OrderNotFoundException(orderId);
-        }
-        return paymentClient.getPaymentByOrder(orderId);
+    /** Fetches the payment detail for an order the caller owns, via payment-service. */
+    public PaymentClient.PaymentInfo getOrderPayment(UUID orderId, UUID userId) {
+        orderRepository.findById(orderId)
+                .filter(order -> order.getUserId().equals(userId))
+                .orElseThrow(() -> new OrderNotFoundException(orderId));
+        return paymentClient.getPaymentByOrder(orderId, userId);
     }
 
     @Transactional

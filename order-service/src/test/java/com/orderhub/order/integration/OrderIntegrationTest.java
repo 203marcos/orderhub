@@ -89,8 +89,38 @@ class OrderIntegrationTest {
         HttpHeaders headers = new HttpHeaders();
         headers.set("X-User-Id", UUID.randomUUID().toString());
 
-        ResponseEntity<String> response = restTemplate.getForEntity(
+        ResponseEntity<String> response = restTemplate.exchange(
                 "/api/v1/orders/" + UUID.randomUUID(),
+                org.springframework.http.HttpMethod.GET,
+                new HttpEntity<>(headers),
+                String.class
+        );
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    void shouldNotExposeAnotherUsersOrder() {
+        UUID productId = UUID.randomUUID();
+        when(catalogClient.getProduct(any()))
+                .thenReturn(new CatalogClient.ProductResponse(productId, "Burger", new BigDecimal("15.90"), true));
+
+        HttpHeaders ownerHeaders = new HttpHeaders();
+        ownerHeaders.set("X-User-Id", UUID.randomUUID().toString());
+        ownerHeaders.set("X-User-Email", "owner@example.com");
+
+        CreateOrderRequest request = new CreateOrderRequest(List.of(new OrderItemRequest(productId, 1)));
+        OrderResponse created = restTemplate.postForEntity(
+                "/api/v1/orders", new HttpEntity<>(request, ownerHeaders), OrderResponse.class).getBody();
+        assertThat(created).isNotNull();
+
+        HttpHeaders attackerHeaders = new HttpHeaders();
+        attackerHeaders.set("X-User-Id", UUID.randomUUID().toString());
+
+        ResponseEntity<String> response = restTemplate.exchange(
+                "/api/v1/orders/" + created.id(),
+                org.springframework.http.HttpMethod.GET,
+                new HttpEntity<>(attackerHeaders),
                 String.class
         );
 
@@ -164,8 +194,11 @@ class OrderIntegrationTest {
                 new BigDecimal("30.00"), LocalDateTime.now()));
 
         await().atMost(15, TimeUnit.SECONDS).untilAsserted(() -> {
-            OrderResponse fetched = restTemplate.getForEntity(
-                    "/api/v1/orders/" + orderId, OrderResponse.class).getBody();
+            OrderResponse fetched = restTemplate.exchange(
+                    "/api/v1/orders/" + orderId,
+                    org.springframework.http.HttpMethod.GET,
+                    new HttpEntity<>(headers),
+                    OrderResponse.class).getBody();
             assertThat(fetched).isNotNull();
             assertThat(fetched.status()).isEqualTo(OrderStatus.CONFIRMED);
         });

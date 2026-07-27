@@ -91,7 +91,7 @@ class OrderServiceTest {
         Order order = new Order(userId, userEmail, new BigDecimal("50.00"));
         when(orderRepository.findById(orderId)).thenReturn(Optional.of(order));
 
-        OrderResponse response = orderService.getOrder(orderId);
+        OrderResponse response = orderService.getOrder(orderId, userId);
 
         assertThat(response.userId()).isEqualTo(userId);
     }
@@ -101,19 +101,31 @@ class OrderServiceTest {
         UUID orderId = UUID.randomUUID();
         when(orderRepository.findById(orderId)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> orderService.getOrder(orderId))
+        assertThatThrownBy(() -> orderService.getOrder(orderId, userId))
+                .isInstanceOf(OrderNotFoundException.class);
+    }
+
+    @Test
+    void shouldHideOrderOwnedBySomeoneElse() {
+        UUID orderId = UUID.randomUUID();
+        Order someoneElsesOrder = new Order(UUID.randomUUID(), "other@example.com", new BigDecimal("50.00"));
+        when(orderRepository.findById(orderId)).thenReturn(Optional.of(someoneElsesOrder));
+
+        // Reported as "not found", not "forbidden", so ids cannot be enumerated.
+        assertThatThrownBy(() -> orderService.getOrder(orderId, userId))
                 .isInstanceOf(OrderNotFoundException.class);
     }
 
     @Test
     void shouldGetOrderPayment() {
         UUID orderId = UUID.randomUUID();
-        when(orderRepository.existsById(orderId)).thenReturn(true);
+        Order order = new Order(userId, userEmail, new BigDecimal("59.98"));
+        when(orderRepository.findById(orderId)).thenReturn(Optional.of(order));
         PaymentClient.PaymentInfo info = new PaymentClient.PaymentInfo(
                 UUID.randomUUID(), orderId, userId, new BigDecimal("59.98"), "APPROVED");
-        when(paymentClient.getPaymentByOrder(orderId)).thenReturn(info);
+        when(paymentClient.getPaymentByOrder(orderId, userId)).thenReturn(info);
 
-        PaymentClient.PaymentInfo result = orderService.getOrderPayment(orderId);
+        PaymentClient.PaymentInfo result = orderService.getOrderPayment(orderId, userId);
 
         assertThat(result.status()).isEqualTo("APPROVED");
         assertThat(result.amount()).isEqualByComparingTo("59.98");
@@ -122,10 +134,21 @@ class OrderServiceTest {
     @Test
     void shouldThrowWhenGettingPaymentForUnknownOrder() {
         UUID orderId = UUID.randomUUID();
-        when(orderRepository.existsById(orderId)).thenReturn(false);
+        when(orderRepository.findById(orderId)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> orderService.getOrderPayment(orderId))
+        assertThatThrownBy(() -> orderService.getOrderPayment(orderId, userId))
                 .isInstanceOf(OrderNotFoundException.class);
+    }
+
+    @Test
+    void shouldNotCallPaymentServiceForAnotherUsersOrder() {
+        UUID orderId = UUID.randomUUID();
+        Order someoneElsesOrder = new Order(UUID.randomUUID(), "other@example.com", new BigDecimal("50.00"));
+        when(orderRepository.findById(orderId)).thenReturn(Optional.of(someoneElsesOrder));
+
+        assertThatThrownBy(() -> orderService.getOrderPayment(orderId, userId))
+                .isInstanceOf(OrderNotFoundException.class);
+        verifyNoInteractions(paymentClient);
     }
 
     @Test

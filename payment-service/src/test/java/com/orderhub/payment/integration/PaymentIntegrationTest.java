@@ -10,6 +10,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -71,8 +74,43 @@ class PaymentIntegrationTest {
 
     @Test
     void shouldReturnNotFoundForUnknownPayment() {
-        ResponseEntity<String> response = restTemplate.getForEntity(
-                "/api/v1/payments/" + UUID.randomUUID(), String.class);
+        ResponseEntity<String> response = restTemplate.exchange(
+                "/api/v1/payments/" + UUID.randomUUID(),
+                HttpMethod.GET,
+                new HttpEntity<>(userHeaders(UUID.randomUUID())),
+                String.class);
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    void shouldNotExposeAnotherUsersPayment() {
+        UUID orderId = UUID.randomUUID();
+        UUID owner = UUID.randomUUID();
+
+        kafkaTemplate.send("order.created", orderId.toString(), new OrderCreatedEvent(
+                orderId, owner, "owner@test.com", List.of(), new BigDecimal("42.00"), LocalDateTime.now()));
+
+        await().atMost(10, TimeUnit.SECONDS)
+                .untilAsserted(() -> assertThat(paymentRepository.findByOrderId(orderId)).isPresent());
+
+        ResponseEntity<String> asAttacker = restTemplate.exchange(
+                "/api/v1/payments/order/" + orderId,
+                HttpMethod.GET,
+                new HttpEntity<>(userHeaders(UUID.randomUUID())),
+                String.class);
+        assertThat(asAttacker.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+
+        ResponseEntity<PaymentResponse> asOwner = restTemplate.exchange(
+                "/api/v1/payments/order/" + orderId,
+                HttpMethod.GET,
+                new HttpEntity<>(userHeaders(owner)),
+                PaymentResponse.class);
+        assertThat(asOwner.getStatusCode()).isEqualTo(HttpStatus.OK);
+    }
+
+    private static HttpHeaders userHeaders(UUID userId) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("X-User-Id", userId.toString());
+        return headers;
     }
 }

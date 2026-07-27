@@ -13,6 +13,6 @@ public class PaymentClientFallback implements FallbackFactory<PaymentClient> {
 
     @Override
     public PaymentClient create(Throwable cause) {
-        return orderId -> new PaymentClient.PaymentInfo(null, orderId, null, null, "UNKNOWN");
+        return (orderId, userId) -> new PaymentClient.PaymentInfo(null, orderId, userId, null, "UNKNOWN");
     }
 }

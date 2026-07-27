@@ -32,13 +32,17 @@ public class OrderController {
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<OrderResponse> getOrder(@PathVariable UUID id) {
-        return ResponseEntity.ok(orderService.getOrder(id));
+    public ResponseEntity<OrderResponse> getOrder(
+            @PathVariable UUID id,
+            @RequestHeader("X-User-Id") UUID userId) {
+        return ResponseEntity.ok(orderService.getOrder(id, userId));
     }
 
     @GetMapping("/{id}/payment")
-    public ResponseEntity<PaymentClient.PaymentInfo> getOrderPayment(@PathVariable UUID id) {
-        return ResponseEntity.ok(orderService.getOrderPayment(id));
+    public ResponseEntity<PaymentClient.PaymentInfo> getOrderPayment(
+            @PathVariable UUID id,
+            @RequestHeader("X-User-Id") UUID userId) {
+        return ResponseEntity.ok(orderService.getOrderPayment(id, userId));
     }
 
     @GetMapping("/my")

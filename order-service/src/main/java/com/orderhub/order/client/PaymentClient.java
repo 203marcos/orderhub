@@ -3,6 +3,7 @@ package com.orderhub.order.client;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestHeader;
 
 import java.math.BigDecimal;
 import java.util.UUID;
@@ -20,8 +21,13 @@ import java.util.UUID;
         fallbackFactory = PaymentClientFallback.class)
 public interface PaymentClient {
 
+    /**
+     * The caller's identity travels as an explicit parameter rather than being lifted from a
+     * ThreadLocal by a {@code RequestInterceptor}: payment-service enforces ownership on this
+     * endpoint, and the circuit breaker may run the call off the request thread.
+     */
     @GetMapping("/api/v1/payments/order/{orderId}")
-    PaymentInfo getPaymentByOrder(@PathVariable UUID orderId);
+    PaymentInfo getPaymentByOrder(@PathVariable UUID orderId, @RequestHeader("X-User-Id") UUID userId);
 
     // Subset of payment-service's PaymentResponse that order-service actually needs.
     record PaymentInfo(UUID id, UUID orderId, UUID userId, BigDecimal amount, String status) {}

@@ -59,14 +59,21 @@ public class PaymentService {
         }
     }
 
-    public PaymentResponse getByOrderId(UUID orderId) {
+    /**
+     * Reads the payment for an order the caller owns. A payment belonging to someone else
+     * is reported as "not found" rather than "forbidden", so the endpoint cannot be used to
+     * probe which ids exist (OWASP API1 — Broken Object Level Authorization).
+     */
+    public PaymentResponse getByOrderId(UUID orderId, UUID userId) {
         return paymentRepository.findByOrderId(orderId)
+                .filter(payment -> payment.getUserId().equals(userId))
                 .map(PaymentResponse::from)
                 .orElseThrow(() -> new PaymentNotFoundException(orderId));
     }
 
-    public PaymentResponse getById(UUID paymentId) {
+    public PaymentResponse getById(UUID paymentId, UUID userId) {
         return paymentRepository.findById(paymentId)
+                .filter(payment -> payment.getUserId().equals(userId))
                 .map(PaymentResponse::from)
                 .orElseThrow(() -> new PaymentNotFoundException(paymentId));
     }

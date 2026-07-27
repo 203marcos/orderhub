@@ -47,16 +47,17 @@ class PaymentProviderContractTest {
     @State("payment exists for order")
     void paymentExistsForOrder() {
         UUID orderId = UUID.fromString("550e8400-e29b-41d4-a716-446655440000");
+        UUID userId = UUID.fromString("9f8b1c2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d");
         PaymentResponse response = new PaymentResponse(
                 UUID.randomUUID(),
                 orderId,
-                UUID.randomUUID(),
+                userId,
                 new BigDecimal("99.99"),
                 PaymentStatus.APPROVED,
                 null,
                 LocalDateTime.now(),
                 LocalDateTime.now()
         );
-        when(paymentService.getByOrderId(any())).thenReturn(response);
+        when(paymentService.getByOrderId(any(), any())).thenReturn(response);
     }
 }
