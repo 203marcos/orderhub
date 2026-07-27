@@ -1,0 +1,597 @@
+{
+  "info": {
+    "_postman_id": "3f2a6b3e-6b7a-4b0a-9d1e-orderhub00001",
+    "name": "OrderHub",
+    "description": "Demo walkthrough of the OrderHub microservices platform through the api-gateway (http://localhost:8080). Run the folders top to bottom: 01 Auth creates tokens, 02 Catalog seeds products as ADMIN, 03 Orders places an order as USER, 04 Saga verification polls the order until the choreographed saga confirms it, and 05 Docs & Ops links the aggregated Swagger UI and gateway health check.\n\nAll service-owned identity (X-User-Id / X-User-Email) is derived by the gateway from the JWT — requests only need an Authorization: Bearer token, never those headers directly.\n\nPrerequisites: `docker compose up -d`, and a `JWT_SECRET` set in your `.env` (the gateway fails fast at startup without it).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "01 Auth",
+      "item": [
+        {
+          "name": "Register User",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{userEmail}}\",\n  \"password\": \"{{userPassword}}\",\n  \"firstName\": \"Demo\",\n  \"lastName\": \"User\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "register"]
+            },
+            "description": "Registers a regular customer. Registration always assigns role USER — product mutations require ADMIN, which is why the seeded admin (V2__seed_admin_user.sql, admin@orderhub.dev) exists for the Catalog folder below.\n\nIf you re-run the collection, this will 409 on the second run since the email already exists — that's expected, just continue to Login User."
+            },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201 (or 409 on re-run)', function () {",
+                  "    pm.expect([201, 409]).to.include(pm.response.code);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login User",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{userEmail}}\",\n  \"password\": \"{{userPassword}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "Authenticates the demo customer and stashes {{userToken}} for every USER-scoped request below (Orders folder, the 403 example in Catalog)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "var jsonData = pm.response.json();",
+                  "pm.test('Response has a token', function () {",
+                  "    pm.expect(jsonData.token).to.be.a('string').and.not.empty;",
+                  "});",
+                  "pm.environment.set('userToken', jsonData.token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login Admin",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{adminEmail}}\",\n  \"password\": \"{{adminPassword}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "Authenticates the seeded DEV admin (admin@orderhub.dev / Admin@123 — see auth-service/src/main/resources/db/migration/V2__seed_admin_user.sql) and stashes {{adminToken}} for the product-mutation requests in 02 Catalog."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "var jsonData = pm.response.json();",
+                  "pm.test('Role is ADMIN', function () {",
+                  "    pm.expect(jsonData.role).to.eql('ADMIN');",
+                  "});",
+                  "pm.environment.set('adminToken', jsonData.token);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 Catalog",
+      "item": [
+        {
+          "name": "Create Product 1 - Burger (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{adminToken}}", "type": "string" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Classic Cheeseburger\",\n  \"description\": \"Beef patty, cheddar, lettuce, house sauce\",\n  \"price\": 28.90,\n  \"category\": \"BURGERS\",\n  \"stock\": 50\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "products"]
+            },
+            "description": "Creates the first sample product as ADMIN. Requires {{adminToken}} from 01 Auth. NOTE: `stock` matches ProductRequest as of the last check during this collection's authoring — if catalog-service's DTO doesn't have that field yet (or renamed it), drop/rename the key here."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "var jsonData = pm.response.json();",
+                  "pm.environment.set('productId', jsonData.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create Product 2 - Fries (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{adminToken}}", "type": "string" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Crispy Fries\",\n  \"description\": \"Salted shoestring fries\",\n  \"price\": 12.50,\n  \"category\": \"SIDES\",\n  \"stock\": 100\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "products"]
+            },
+            "description": "Creates the second sample product as ADMIN, used as the second order line in 03 Orders."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "var jsonData = pm.response.json();",
+                  "pm.environment.set('productId2', jsonData.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create Product 3 - Soda (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{adminToken}}", "type": "string" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Soda Can 350ml\",\n  \"description\": \"Chilled soft drink\",\n  \"price\": 7.00,\n  \"category\": \"DRINKS\",\n  \"stock\": 200\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "products"]
+            },
+            "description": "Optional third sample product, just to show the catalog with more than two items in the list/get requests below."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "var jsonData = pm.response.json();",
+                  "pm.environment.set('productId3', jsonData.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Products",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products?page=0&size=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "products"],
+              "query": [
+                { "key": "page", "value": "0" },
+                { "key": "size", "value": "20" }
+              ]
+            },
+            "description": "Public, paginated list of available products. No auth required."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Response is a page', function () {",
+                  "    pm.expect(pm.response.json()).to.have.property('content');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Product By Id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products/{{productId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "products", "{{productId}}"]
+            },
+            "description": "Fetches the first sample product created above. Public endpoint."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Id matches productId', function () {",
+                  "    pm.expect(pm.response.json().id).to.eql(pm.environment.get('productId'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create Product - Forbidden (User)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{userToken}}", "type": "string" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Should Not Be Created\",\n  \"description\": \"Regular users cannot mutate the catalog\",\n  \"price\": 1.00,\n  \"category\": \"BURGERS\",\n  \"stock\": 1\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "products"]
+            },
+            "description": "Demonstrates the ADMIN-only enforcement on product mutations: a plain USER token gets 403 Forbidden here."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 403', function () {",
+                  "    pm.response.to.have.status(403);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 Orders",
+      "item": [
+        {
+          "name": "Create Order",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{userToken}}", "type": "string" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    { \"productId\": \"{{productId}}\", \"quantity\": 2 },\n    { \"productId\": \"{{productId2}}\", \"quantity\": 1 }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orders",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "orders"]
+            },
+            "description": "Places an order as USER for the two sample products created in 02 Catalog. order-service writes the order PENDING and an OrderCreated event to its outbox in the same transaction — the OutboxPublisher relays it to Kafka shortly after. The gateway derives X-User-Id/X-User-Email from the JWT, so only the Authorization header is needed here."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "var jsonData = pm.response.json();",
+                  "pm.test('Status is PENDING right after creation', function () {",
+                  "    pm.expect(jsonData.status).to.eql('PENDING');",
+                  "});",
+                  "pm.environment.set('orderId', jsonData.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Order",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{userToken}}", "type": "string" }]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orders/{{orderId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "orders", "{{orderId}}"]
+            },
+            "description": "Fetches the order just created. Right after Create Order this is usually still PENDING — use the 04 Saga verification folder to poll until CONFIRMED."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "console.log('Order status:', pm.response.json().status);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List My Orders",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{userToken}}", "type": "string" }]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orders/my",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "orders", "my"]
+            },
+            "description": "Lists every order owned by the currently authenticated USER (ownership is enforced server-side from the gateway-derived X-User-Id, not client input)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Response is a list', function () {",
+                  "    pm.expect(pm.response.json()).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Order Payment",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{userToken}}", "type": "string" }]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orders/{{orderId}}/payment",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "orders", "{{orderId}}", "payment"]
+            },
+            "description": "Calls order-service, which uses PaymentClient (Feign, with a circuit breaker) to fetch the payment record from payment-service. This can 404/503 until payment-service's OrderCreated consumer has actually processed the event — if you hit that, run 04 Saga verification first, then retry this request."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 or 404 (payment may not exist yet)', function () {",
+                  "    pm.expect([200, 404]).to.include(pm.response.code);",
+                  "});",
+                  "if (pm.response.code === 200) {",
+                  "    pm.environment.set('paymentId', pm.response.json().id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 Saga verification",
+      "item": [
+        {
+          "name": "Poll Order Until CONFIRMED",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{userToken}}", "type": "string" }]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orders/{{orderId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "orders", "{{orderId}}"]
+            },
+            "description": "The Saga is choreographed, not orchestrated, so confirmation happens asynchronously: order-service publishes OrderCreated -> payment-service consumes it and publishes PaymentApproved/PaymentFailed -> order-service's own consumer flips the order to CONFIRMED (or FAILED). There is no single synchronous call to wait on.\n\nHOW TO USE THIS REQUEST: click Send repeatedly (every second or two) — or select it in the Collection Runner with a delay — until the status field reads CONFIRMED (or FAILED). This is expected to take a few outbox poll cycles, not be instant.\n\nOnce CONFIRMED, check Mailhog at http://localhost:8025 — notification-service consumes PaymentApproved and sends a confirmation email there (dev SMTP, nothing leaves the box)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "var status = pm.response.json().status;",
+                  "console.log('Current order status:', status);",
+                  "pm.test('Order has reached a terminal saga state (informational — re-run if PENDING)', function () {",
+                  "    pm.expect(['PENDING', 'CONFIRMED', 'FAILED']).to.include(status);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "05 Docs & Ops",
+      "item": [
+        {
+          "name": "Swagger UI (aggregated)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/swagger-ui.html",
+              "host": ["{{baseUrl}}"],
+              "path": ["swagger-ui.html"]
+            },
+            "description": "The gateway aggregates every service's OpenAPI spec (auth, catalog, order, payment) into one Swagger UI. Best opened in a browser rather than Postman, but useful to confirm the route resolves."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Gateway Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/actuator/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["actuator", "health"]
+            },
+            "description": "api-gateway's own Actuator health check. Each service exposes the same endpoint on its own port; this is the one reachable from outside Docker's network since api-gateway is the only service binding a host port."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Status is UP', function () {",
+                  "    pm.expect(pm.response.json().status).to.eql('UP');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
