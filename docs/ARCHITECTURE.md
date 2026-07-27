@@ -199,6 +199,54 @@ Two consequences worth being explicit about:
 Records that fail even after three retries are parked on `<topic>.dlt` by a
 `DeadLetterPublishingRecoverer` rather than being logged and dropped.
 
+### 2.4.2 The compensating transaction — stock reservation in catalog-service
+
+Section 2.4 said Kafka gives no ordering guarantee between the events settling an order, and
+that only a `PENDING` order may change state. The same idea applies one level down: an order
+that *did* get accepted can still fail to be paid, and by then catalog-service has already
+told the world that stock exists for it. `StockReservationService` is what keeps that promise
+honest — the compensating transaction the roadmap used to call out as the saga's weakest spot.
+
+```
+order.created  ──▶ reserve stock (atomic UPDATE per line, all-or-nothing)  ──▶ RESERVED
+                                                                                   │
+                    payment.failed  ───────────────────────────────┐             │
+                                                                     ├──▶ RELEASED
+                    order.cancelled ───────────────────────────────┘             │
+                                                                                   │
+                    insufficient stock at reservation time ──────────────────▶ FAILED
+```
+
+**Reservation.** `order.created` carries the line items order-service already priced. For each
+line, catalog-service runs `UPDATE products SET stock = stock - :qty WHERE id = :id AND stock
+>= :qty` — the availability check and the write are the same statement, so two concurrent
+orders for the same product can never both succeed past the point where stock would go
+negative. A Java read-then-write (`if (stock >= qty) stock -= qty`) would race exactly there.
+If a later line in the same order comes back short, the lines already decremented for that
+order are put back before anything is recorded — the order's stock move is all-or-nothing,
+never partial. A `stock_reservations` row (order id unique, one child row per line) is the
+audit trail and the idempotency guard: `order_id` already present means a redelivered
+`order.created` is acknowledged, not reserved twice — the same shape as payment-service's
+guard on `payments.order_id`.
+
+**Release.** Two independent events can make a reservation moot: `payment.failed` (the order
+was accepted but never got paid) and `order.cancelled` (an event order-service publishes
+independently of payment). Either can be redelivered, and both can arrive for the same order.
+The release is a single conditional statement, `UPDATE stock_reservations SET status =
+RELEASED WHERE order_id = :id AND status = RESERVED`: only the caller that actually performs
+that transition puts stock back, so a redelivery or the *other* trigger arriving afterwards
+sees zero rows updated and does nothing. A reservation already `RELEASED` or `FAILED` — or one
+that never existed for that order — is logged and skipped, never treated as an error.
+
+**Current limitation.** A `FAILED` reservation (not enough stock at reservation time) is
+recorded and logged, but nothing downstream is told: the order sits wherever order-service put
+it, with no signal that catalog-service could not actually back it with stock. The complete
+version of this flow publishes a `stock.rejected` event so order-service can settle the order
+the same way it settles `payment.failed` — deliberately not implemented yet, so it is listed
+here rather than silently assumed. Until it exists, `reserveStock` logs a warning and returns
+instead of throwing: throwing would only hand the same, permanent failure to the
+`DefaultErrorHandler`, which would retry it three times and dead-letter it for no benefit.
+
 ### 2.5 Infrastructure
 
 Everything runs from one `docker compose up -d --build`: four PostgreSQL instances (one per stateful service), Redis, a single-node Kafka broker in KRaft mode (ZooKeeper was removed in Kafka 4.0), Mailhog, and the observability stack (Prometheus, Grafana, Loki + Promtail, Jaeger). All six apps are containerized and join the same network, so metrics, logs, and traces are collected automatically.

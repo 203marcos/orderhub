@@ -1,9 +1,13 @@
 server:
   port: 8082
+  # Finish in-flight requests before the JVM exits on SIGTERM instead of dropping them mid-response.
+  shutdown: graceful
 
 spring:
   application:
     name: catalog-service
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
   threads:
     virtual:
       enabled: true
@@ -28,6 +32,12 @@ spring:
       port: ${REDIS_PORT:6379}
   cache:
     type: redis
+  kafka:
+    bootstrap-servers: ${KAFKA_SERVERS:localhost:9092}
+    consumer:
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      auto-offset-reset: earliest
 
 # Cache-aside TTL for the products cache (ISO-8601 or simple duration, e.g. 10m, 30s).
 catalog:
@@ -49,6 +59,15 @@ management:
   endpoint:
     health:
       show-details: always
+      probes:
+        enabled: true
+      # readiness gates traffic (needs the DB and the Redis cache); liveness only asks "is the
+      # process alive" so a DB/Redis/Kafka blip can't trigger a pointless pod restart.
+      group:
+        readiness:
+          include: readinessState,db,redis
+        liveness:
+          include: livenessState
   metrics:
     export:
       prometheus:

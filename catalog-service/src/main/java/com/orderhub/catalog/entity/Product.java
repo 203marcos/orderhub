@@ -29,6 +29,12 @@ public class Product {
     @Column(nullable = false)
     private boolean available = true;
 
+    // Reserved and released atomically by StockReservationService via a repository
+    // @Modifying query — never read here, mutated in Java, and written back, which would
+    // race under concurrent orders for the same product.
+    @Column(nullable = false)
+    private int stock = 0;
+
     @CreationTimestamp
     private LocalDateTime createdAt;
 
@@ -37,11 +43,12 @@ public class Product {
 
     public Product() {}
 
-    public Product(String name, String description, BigDecimal price, String category) {
+    public Product(String name, String description, BigDecimal price, String category, int stock) {
         this.name = name;
         this.description = description;
         this.price = price;
         this.category = category;
+        this.stock = stock;
     }
 
     public UUID getId() { return id; }
@@ -50,6 +57,7 @@ public class Product {
     public BigDecimal getPrice() { return price; }
     public String getCategory() { return category; }
     public boolean isAvailable() { return available; }
+    public int getStock() { return stock; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }
 
@@ -58,4 +66,5 @@ public class Product {
     public void setPrice(BigDecimal price) { this.price = price; }
     public void setCategory(String category) { this.category = category; }
     public void setAvailable(boolean available) { this.available = available; }
+    public void setStock(int stock) { this.stock = stock; }
 }

@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.data.domain.Page;
@@ -45,6 +46,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @DisplayName("ProductController")
 class ProductControllerTest {
 
+    private static final String ROLE_HEADER = "X-User-Role";
+    private static final String ADMIN = "ADMIN";
+
     @Autowired MockMvc mockMvc;
     @Autowired ObjectMapper objectMapper;
 
@@ -54,7 +58,11 @@ class ProductControllerTest {
 
     private ProductResponse aProduct() {
         return new ProductResponse(productId, "Burger", "Cheese burger",
-                new BigDecimal("25.90"), "food", true, LocalDateTime.now(), LocalDateTime.now());
+                new BigDecimal("25.90"), "food", true, 10, LocalDateTime.now(), LocalDateTime.now());
+    }
+
+    private ProductRequest aRequest() {
+        return new ProductRequest("Burger", "Cheese burger", new BigDecimal("25.90"), "food", 10);
     }
 
     @Nested
@@ -67,12 +75,13 @@ class ProductControllerTest {
             when(productService.create(any())).thenReturn(aProduct());
 
             mockMvc.perform(post("/api/v1/products")
+                            .header(ROLE_HEADER, ADMIN)
                             .contentType(MediaType.APPLICATION_JSON)
-                            .content(objectMapper.writeValueAsString(new ProductRequest(
-                                    "Burger", "Cheese burger", new BigDecimal("25.90"), "food"))))
+                            .content(objectMapper.writeValueAsString(aRequest())))
                     .andExpect(status().isCreated())
                     .andExpect(jsonPath("$.name").value("Burger"))
-                    .andExpect(jsonPath("$.available").value(true));
+                    .andExpect(jsonPath("$.available").value(true))
+                    .andExpect(jsonPath("$.stock").value(10));
         }
 
         /**
@@ -90,9 +99,10 @@ class ProductControllerTest {
         @DisplayName("returns 400 for an invalid product")
         void shouldRejectInvalidProducts(String name, BigDecimal price) throws Exception {
             mockMvc.perform(post("/api/v1/products")
+                            .header(ROLE_HEADER, ADMIN)
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(
-                                    new ProductRequest(name, "desc", price, "food"))))
+                                    new ProductRequest(name, "desc", price, "food", 10))))
                     .andExpect(status().isBadRequest());
 
             verifyNoInteractions(productService);
@@ -102,9 +112,60 @@ class ProductControllerTest {
         @DisplayName("returns 400 for a missing price")
         void shouldRejectAMissingPrice() throws Exception {
             mockMvc.perform(post("/api/v1/products")
+                            .header(ROLE_HEADER, ADMIN)
                             .contentType(MediaType.APPLICATION_JSON)
-                            .content("{\"name\":\"Burger\",\"category\":\"food\"}"))
+                            .content("{\"name\":\"Burger\",\"category\":\"food\",\"stock\":10}"))
                     .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @DisplayName("returns 400 for a missing stock")
+        void shouldRejectAMissingStock() throws Exception {
+            mockMvc.perform(post("/api/v1/products")
+                            .header(ROLE_HEADER, ADMIN)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"name\":\"Burger\",\"category\":\"food\",\"price\":25.90}"))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @ParameterizedTest(name = "stock={0}")
+        @ValueSource(ints = {-1, 1_000_001})
+        @DisplayName("returns 400 for stock out of bounds")
+        void shouldRejectStockOutOfBounds(int stock) throws Exception {
+            mockMvc.perform(post("/api/v1/products")
+                            .header(ROLE_HEADER, ADMIN)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(
+                                    new ProductRequest("Burger", "desc", new BigDecimal("25.90"), "food", stock))))
+                    .andExpect(status().isBadRequest());
+
+            verifyNoInteractions(productService);
+        }
+
+        @Test
+        @DisplayName("returns 400 for a price above the allowed maximum")
+        void shouldRejectAPriceAboveTheMaximum() throws Exception {
+            mockMvc.perform(post("/api/v1/products")
+                            .header(ROLE_HEADER, ADMIN)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(
+                                    new ProductRequest("Burger", "desc", new BigDecimal("1000000.00"), "food", 10))))
+                    .andExpect(status().isBadRequest());
+
+            verifyNoInteractions(productService);
+        }
+
+        @Test
+        @DisplayName("returns 400 for a name over the size limit")
+        void shouldRejectANameOverTheLimit() throws Exception {
+            mockMvc.perform(post("/api/v1/products")
+                            .header(ROLE_HEADER, ADMIN)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(new ProductRequest(
+                                    "x".repeat(121), "desc", new BigDecimal("25.90"), "food", 10))))
+                    .andExpect(status().isBadRequest());
+
+            verifyNoInteractions(productService);
         }
 
         @Test
@@ -112,6 +173,7 @@ class ProductControllerTest {
         void shouldRejectMalformedJson() throws Exception {
             // Handled by ResponseEntityExceptionHandler; without it this would be a 500.
             mockMvc.perform(post("/api/v1/products")
+                            .header(ROLE_HEADER, ADMIN)
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{\"name\": "))
                     .andExpect(status().isBadRequest());
@@ -172,6 +234,15 @@ class ProductControllerTest {
             mockMvc.perform(get("/api/v1/products/category/{category}", "drinks"))
                     .andExpect(status().isOk());
         }
+
+        @Test
+        @DisplayName("stays open without any identity header")
+        void shouldNotRequireAnyHeader() throws Exception {
+            when(productService.findAllAvailable(any(Pageable.class))).thenReturn(new PageImpl<>(List.of()));
+
+            mockMvc.perform(get("/api/v1/products"))
+                    .andExpect(status().isOk());
+        }
     }
 
     @Nested
@@ -184,9 +255,9 @@ class ProductControllerTest {
             when(productService.update(eq(productId), any())).thenReturn(aProduct());
 
             mockMvc.perform(put("/api/v1/products/{id}", productId)
+                            .header(ROLE_HEADER, ADMIN)
                             .contentType(MediaType.APPLICATION_JSON)
-                            .content(objectMapper.writeValueAsString(new ProductRequest(
-                                    "Burger", "Cheese burger", new BigDecimal("25.90"), "food"))))
+                            .content(objectMapper.writeValueAsString(aRequest())))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.name").value("Burger"));
         }
@@ -198,9 +269,9 @@ class ProductControllerTest {
                     .thenThrow(new ProductNotFoundException(productId));
 
             mockMvc.perform(put("/api/v1/products/{id}", productId)
+                            .header(ROLE_HEADER, ADMIN)
                             .contentType(MediaType.APPLICATION_JSON)
-                            .content(objectMapper.writeValueAsString(new ProductRequest(
-                                    "Burger", "Cheese burger", new BigDecimal("25.90"), "food"))))
+                            .content(objectMapper.writeValueAsString(aRequest())))
                     .andExpect(status().isNotFound());
         }
 
@@ -208,9 +279,10 @@ class ProductControllerTest {
         @DisplayName("returns 400 for an invalid product and never reaches the service")
         void shouldRejectInvalidUpdates() throws Exception {
             mockMvc.perform(put("/api/v1/products/{id}", productId)
+                            .header(ROLE_HEADER, ADMIN)
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(
-                                    new ProductRequest("", "desc", new BigDecimal("-1.00"), "food"))))
+                                    new ProductRequest("", "desc", new BigDecimal("-1.00"), "food", 10))))
                     .andExpect(status().isBadRequest());
 
             verifyNoInteractions(productService);
@@ -224,7 +296,8 @@ class ProductControllerTest {
         @Test
         @DisplayName("returns 204 when the product is deleted")
         void shouldReturn204() throws Exception {
-            mockMvc.perform(delete("/api/v1/products/{id}", productId))
+            mockMvc.perform(delete("/api/v1/products/{id}", productId)
+                            .header(ROLE_HEADER, ADMIN))
                     .andExpect(status().isNoContent());
 
             verify(productService).delete(productId);
@@ -236,8 +309,66 @@ class ProductControllerTest {
             doThrow(new ProductNotFoundException(productId))
                     .when(productService).delete(productId);
 
-            mockMvc.perform(delete("/api/v1/products/{id}", productId))
+            mockMvc.perform(delete("/api/v1/products/{id}", productId)
+                            .header(ROLE_HEADER, ADMIN))
                     .andExpect(status().isNotFound());
+        }
+    }
+
+    @Nested
+    @DisplayName("RBAC on mutations")
+    class AdminOnlyMutations {
+
+        @Test
+        @DisplayName("POST without X-User-Role returns 403 and never reaches the service")
+        void shouldRejectCreateWithoutRoleHeader() throws Exception {
+            mockMvc.perform(post("/api/v1/products")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(aRequest())))
+                    .andExpect(status().isForbidden());
+
+            verifyNoInteractions(productService);
+        }
+
+        @Test
+        @DisplayName("POST with a non-ADMIN role returns 403")
+        void shouldRejectCreateForNonAdminRole() throws Exception {
+            mockMvc.perform(post("/api/v1/products")
+                            .header(ROLE_HEADER, "CUSTOMER")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(aRequest())))
+                    .andExpect(status().isForbidden());
+
+            verifyNoInteractions(productService);
+        }
+
+        @Test
+        @DisplayName("PUT without X-User-Role returns 403 and never reaches the service")
+        void shouldRejectUpdateWithoutRoleHeader() throws Exception {
+            mockMvc.perform(put("/api/v1/products/{id}", productId)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(aRequest())))
+                    .andExpect(status().isForbidden());
+
+            verifyNoInteractions(productService);
+        }
+
+        @Test
+        @DisplayName("DELETE without X-User-Role returns 403 and never reaches the service")
+        void shouldRejectDeleteWithoutRoleHeader() throws Exception {
+            mockMvc.perform(delete("/api/v1/products/{id}", productId))
+                    .andExpect(status().isForbidden());
+
+            verifyNoInteractions(productService);
+        }
+
+        @Test
+        @DisplayName("GET never requires the role header, even for an ADMIN-only path prefix")
+        void shouldAllowReadsWithoutRoleHeader() throws Exception {
+            when(productService.findById(productId)).thenReturn(aProduct());
+
+            mockMvc.perform(get("/api/v1/products/{id}", productId))
+                    .andExpect(status().isOk());
         }
     }
 }

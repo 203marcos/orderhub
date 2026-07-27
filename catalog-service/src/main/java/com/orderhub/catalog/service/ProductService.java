@@ -40,7 +40,8 @@ public class ProductService {
 
     @Transactional
     public ProductResponse create(ProductRequest request) {
-        Product product = new Product(request.name(), request.description(), request.price(), request.category());
+        Product product = new Product(
+                request.name(), request.description(), request.price(), request.category(), request.stock());
         return ProductResponse.from(productRepository.save(product));
     }
 
@@ -52,6 +53,7 @@ public class ProductService {
         product.setDescription(request.description());
         product.setPrice(request.price());
         product.setCategory(request.category());
+        product.setStock(request.stock());
         return ProductResponse.from(productRepository.save(product));
     }
 

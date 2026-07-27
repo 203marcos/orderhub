@@ -60,7 +60,7 @@ class RedisConfigTest {
     void shouldSerializeWithoutDefaultTyping() {
         ProductResponse product = new ProductResponse(
                 UUID.randomUUID(), "Burger", "Cheese burger", new BigDecimal("25.90"),
-                "food", true, LocalDateTime.now(), LocalDateTime.now());
+                "food", true, 10, LocalDateTime.now(), LocalDateTime.now());
 
         String json = read(productsCacheConfig(Duration.ofMinutes(10))
                 .getValueSerializationPair().write(product));

@@ -42,7 +42,7 @@ class ProductServiceTest {
     @BeforeEach
     void setUp() {
         productId = UUID.randomUUID();
-        product = new Product("Burger", "Cheese burger", new BigDecimal("25.90"), "food");
+        product = new Product("Burger", "Cheese burger", new BigDecimal("25.90"), "food", 10);
         ReflectionTestUtils.setField(product, "id", productId);
         ReflectionTestUtils.setField(product, "createdAt", LocalDateTime.now());
         ReflectionTestUtils.setField(product, "updatedAt", LocalDateTime.now());
@@ -71,7 +71,7 @@ class ProductServiceTest {
 
     @Test
     void shouldCreateProduct() {
-        ProductRequest request = new ProductRequest("Burger", "Cheese burger", new BigDecimal("25.90"), "food");
+        ProductRequest request = new ProductRequest("Burger", "Cheese burger", new BigDecimal("25.90"), "food", 10);
         when(productRepository.save(any(Product.class))).thenReturn(product);
 
         ProductResponse response = productService.create(request);
@@ -83,7 +83,7 @@ class ProductServiceTest {
 
     @Test
     void shouldUpdateProduct() {
-        ProductRequest request = new ProductRequest("Updated Burger", "Updated desc", new BigDecimal("29.90"), "food");
+        ProductRequest request = new ProductRequest("Updated Burger", "Updated desc", new BigDecimal("29.90"), "food", 5);
         when(productRepository.findById(productId)).thenReturn(Optional.of(product));
         when(productRepository.save(product)).thenReturn(product);
 
@@ -96,7 +96,7 @@ class ProductServiceTest {
 
     @Test
     void shouldThrowWhenUpdatingNonExistentProduct() {
-        ProductRequest request = new ProductRequest("Burger", null, new BigDecimal("25.90"), null);
+        ProductRequest request = new ProductRequest("Burger", null, new BigDecimal("25.90"), null, 0);
         when(productRepository.findById(productId)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> productService.update(productId, request))
