@@ -25,8 +25,19 @@ import java.util.UUID;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
+/**
+ * Verifies that this service still satisfies the contract order-service depends on.
+ *
+ * <p>The contract is produced by the consumer's test and copied here by the build, so it
+ * lives under {@code target/} — generated state, wiped by {@code mvn clean} like anything
+ * else. Keeping it outside {@code target/} once meant a stale copy could linger locally and
+ * hide the fact that CI, starting clean, had nothing to verify against.
+ *
+ * <p>Run {@code mvn test -pl order-service -Dtest=PaymentServiceContractTest} first, then copy
+ * {@code order-service/target/pacts/*.json} here — that is exactly what the pipeline does.
+ */
 @Provider("payment-service")
-@PactFolder("pacts")
+@PactFolder("target/pacts")
 @WebMvcTest(PaymentController.class)
 class PaymentProviderContractTest {
 

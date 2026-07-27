@@ -48,17 +48,24 @@ jobs:
       - name: Build and install all modules
         run: mvn -B clean install -DskipTests --no-transfer-progress
 
+      # Pact is consumer-driven: order-service writes the contract, payment-service verifies
+      # it. The provider's test is an ordinary unit test, so it runs in the reactor-wide step
+      # below — which means the contract has to exist before that step, not after it.
+      #
+      # No -am: the shared modules were installed above, and -Dtest= would fail on a module
+      # that has no matching test.
+      - name: Generate the Pact contract (consumer)
+        run: mvn -B test -pl order-service -Dtest=PaymentServiceContractTest --no-transfer-progress
+
+      - name: Publish the Pact contract to the provider
+        run: |
+          mkdir -p payment-service/target/pacts
+          cp order-service/target/pacts/*.json payment-service/target/pacts/
+
       # Everything except the Docker-backed tests, across the whole reactor. A logic error
       # fails here in about a minute instead of after waiting for containers to start.
       - name: Unit, slice, architecture and contract tests
         run: mvn -B test --no-transfer-progress
-
-      # The provider verifies the contract the consumer produced in the step above.
-      - name: Publish Pact contract to the provider
-        if: ${{ !cancelled() }}
-        run: |
-          mkdir -p payment-service/pacts
-          cp order-service/target/pacts/*.json payment-service/pacts/
 
       # From here each module is verified on its own, with the @Tag("integration")
       # Testcontainers tests enabled and the JaCoCo gate applied.
