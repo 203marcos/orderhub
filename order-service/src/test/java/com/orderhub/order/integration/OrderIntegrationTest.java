@@ -5,6 +5,7 @@ import com.orderhub.order.dto.CreateOrderRequest;
 import com.orderhub.order.dto.OrderItemRequest;
 import com.orderhub.order.dto.OrderResponse;
 import com.orderhub.order.entity.OrderStatus;
+import com.orderhub.order.event.PaymentApprovedEvent;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,6 +16,7 @@ import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.KafkaContainer;
@@ -24,10 +26,13 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
@@ -56,6 +61,9 @@ class OrderIntegrationTest {
 
     @Autowired
     TestRestTemplate restTemplate;
+
+    @Autowired
+    KafkaTemplate<String, Object> kafkaTemplate;
 
     @Test
     void shouldCreateOrderSuccessfully() {
@@ -139,5 +147,34 @@ class OrderIntegrationTest {
 
         assertThat(listResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(listResponse.getBody()).isNotEmpty();
+    }
+
+    @Test
+    void shouldConfirmOrderWhenPaymentApprovedEventReceived() {
+        UUID productId = UUID.randomUUID();
+        when(catalogClient.getProduct(any()))
+                .thenReturn(new CatalogClient.ProductResponse(productId, "Pizza", new BigDecimal("30.00"), true));
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("X-User-Id", UUID.randomUUID().toString());
+        headers.set("X-User-Email", "customer@example.com");
+
+        CreateOrderRequest request = new CreateOrderRequest(List.of(new OrderItemRequest(productId, 1)));
+        OrderResponse created = restTemplate.postForEntity(
+                "/api/v1/orders", new HttpEntity<>(request, headers), OrderResponse.class).getBody();
+        assertThat(created).isNotNull();
+        UUID orderId = created.id();
+
+        // Simulate payment-service publishing an approval; the Saga consumer must confirm the order.
+        kafkaTemplate.send("payment.approved", orderId.toString(), new PaymentApprovedEvent(
+                orderId, UUID.randomUUID(), UUID.randomUUID(), "customer@example.com",
+                new BigDecimal("30.00"), LocalDateTime.now()));
+
+        await().atMost(15, TimeUnit.SECONDS).untilAsserted(() -> {
+            OrderResponse fetched = restTemplate.getForEntity(
+                    "/api/v1/orders/" + orderId, OrderResponse.class).getBody();
+            assertThat(fetched).isNotNull();
+            assertThat(fetched.status()).isEqualTo(OrderStatus.CONFIRMED);
+        });
     }
 }
