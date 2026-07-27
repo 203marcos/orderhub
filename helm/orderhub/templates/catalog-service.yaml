@@ -43,10 +43,18 @@ spec:
               value: http://jaeger:4317
           readinessProbe:
             httpGet:
-              path: /actuator/health
+              path: /actuator/health/readiness
               port: {{ .Values.catalogService.port }}
-            initialDelaySeconds: 30
+            initialDelaySeconds: 15
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: {{ .Values.catalogService.port }}
+            initialDelaySeconds: 45
             periodSeconds: 10
+            failureThreshold: 6
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
 ---

@@ -1,9 +1,13 @@
 server:
   port: 8084
+  # Finish in-flight requests before the JVM exits on SIGTERM instead of dropping them mid-response.
+  shutdown: graceful
 
 spring:
   application:
     name: payment-service
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
   threads:
     virtual:
       enabled: true
@@ -41,6 +45,16 @@ management:
   endpoint:
     health:
       show-details: always
+      probes:
+        enabled: true
+      # readiness gates traffic (needs the DB). Kafka is deliberately excluded: events go through
+      # the transactional outbox, so a broker blip doesn't stop this instance serving HTTP — and
+      # liveness stays limited to "is the process alive" so no dependency blip restarts the pod.
+      group:
+        readiness:
+          include: readinessState,db
+        liveness:
+          include: livenessState
   metrics:
     export:
       prometheus:
