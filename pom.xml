@@ -34,6 +34,9 @@
         <testcontainers.version>1.20.4</testcontainers.version>
         <springdoc.version>2.6.0</springdoc.version>
         <logstash-logback-encoder.version>7.4</logstash-logback-encoder.version>
+        <!-- Test groups excluded by default (fast `mvn test`). Override with
+             -DexcludedGroups= (empty) to also run @Tag("integration") Testcontainers tests. -->
+        <excludedGroups>integration</excludedGroups>
     </properties>
 
     <dependencyManagement>
@@ -92,7 +95,7 @@
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-surefire-plugin</artifactId>
                     <configuration>
-                        <excludedGroups>integration</excludedGroups>
+                        <excludedGroups>${excludedGroups}</excludedGroups>
                     </configuration>
                 </plugin>
                 <plugin>
