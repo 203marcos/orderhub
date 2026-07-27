@@ -6,6 +6,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Limit;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.kafka.support.SendResult;
 
 import java.util.List;
 import java.util.UUID;
@@ -15,6 +16,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -87,6 +89,35 @@ class OutboxPublisherTest {
 
         assertThat(second.getPublishedAt()).isNull();
         verify(kafkaTemplate, never()).send(any(), eq(second.messageKey()), any());
+    }
+
+    @Test
+    void shouldStopWithoutMarkingPublishedWhenInterruptedWhileWaitingForTheBroker() throws Exception {
+        OutboxEvent first = pendingEvent(UUID.randomUUID());
+        OutboxEvent second = pendingEvent(UUID.randomUUID());
+        when(outboxRepository.findByPublishedAtIsNullOrderByCreatedAtAsc(any(Limit.class)))
+                .thenReturn(List.of(first, second));
+
+        @SuppressWarnings("unchecked")
+        CompletableFuture<SendResult<String, String>> future = mock(CompletableFuture.class);
+        when(future.get()).thenThrow(new InterruptedException());
+        when(kafkaTemplate.send(any(), any(), any())).thenReturn(future);
+
+        try {
+            publisher().publishPending();
+
+            // Neither event is marked published: the loop must stop at the first record, not
+            // just swallow the interrupt and carry on to the next one.
+            assertThat(first.getPublishedAt()).isNull();
+            assertThat(second.getPublishedAt()).isNull();
+            verify(kafkaTemplate, never()).send(any(), eq(second.messageKey()), any());
+            // The interrupt must be restored on the thread, not discarded, so the surrounding
+            // scheduler/transaction machinery can still observe it.
+            assertThat(Thread.currentThread().isInterrupted()).isTrue();
+        } finally {
+            // Clear the flag so it can't bleed into whichever test runs next in this JVM.
+            Thread.interrupted();
+        }
     }
 
     @Test

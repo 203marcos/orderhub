@@ -1,9 +1,10 @@
-package com.orderhub.auth.exception;
+package com.orderhub.catalog.exception;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
-import org.springframework.security.authentication.BadCredentialsException;
+
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -12,23 +13,13 @@ class GlobalExceptionHandlerTest {
     private final GlobalExceptionHandler handler = new GlobalExceptionHandler();
 
     @Test
-    void shouldMapADuplicateEmailTo409() {
-        ProblemDetail problem =
-                handler.handleEmailExists(new EmailAlreadyExistsException("marcos@orderhub.com"));
+    void shouldMapAMissingProductTo404WithItsId() {
+        UUID id = UUID.randomUUID();
 
-        assertThat(problem.getStatus()).isEqualTo(HttpStatus.CONFLICT.value());
-    }
+        ProblemDetail problem = handler.handleProductNotFound(new ProductNotFoundException(id));
 
-    @Test
-    void shouldNotRevealWhichHalfOfTheCredentialsWasWrong() {
-        ProblemDetail problem =
-                handler.handleBadCredentials(new BadCredentialsException("No user found for ghost@orderhub.com"));
-
-        assertThat(problem.getStatus()).isEqualTo(HttpStatus.UNAUTHORIZED.value());
-        // A distinct "unknown email" message would turn login into an account-enumeration oracle.
-        assertThat(problem.getDetail())
-                .isEqualTo("Invalid email or password")
-                .doesNotContain("ghost@orderhub.com");
+        assertThat(problem.getStatus()).isEqualTo(HttpStatus.NOT_FOUND.value());
+        assertThat(problem.getDetail()).contains(id.toString());
     }
 
     @Test

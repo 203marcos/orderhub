@@ -27,11 +27,13 @@ import java.util.UUID;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -133,6 +135,17 @@ class ProductControllerTest {
         }
 
         @Test
+        @DisplayName("returns the product when found")
+        void shouldReturnTheProduct() throws Exception {
+            when(productService.findById(productId)).thenReturn(aProduct());
+
+            mockMvc.perform(get("/api/v1/products/{id}", productId))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.name").value("Burger"))
+                    .andExpect(jsonPath("$.price").value(25.90));
+        }
+
+        @Test
         @DisplayName("returns 404 for an unknown product")
         void shouldReturn404() throws Exception {
             when(productService.findById(productId)).thenThrow(new ProductNotFoundException(productId));
@@ -162,8 +175,60 @@ class ProductControllerTest {
     }
 
     @Nested
+    @DisplayName("PUT /api/v1/products/{id}")
+    class UpdateProduct {
+
+        @Test
+        @DisplayName("returns 200 with the updated product")
+        void shouldReturn200() throws Exception {
+            when(productService.update(eq(productId), any())).thenReturn(aProduct());
+
+            mockMvc.perform(put("/api/v1/products/{id}", productId)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(new ProductRequest(
+                                    "Burger", "Cheese burger", new BigDecimal("25.90"), "food"))))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.name").value("Burger"));
+        }
+
+        @Test
+        @DisplayName("returns 404 when the product does not exist")
+        void shouldReturn404() throws Exception {
+            when(productService.update(eq(productId), any()))
+                    .thenThrow(new ProductNotFoundException(productId));
+
+            mockMvc.perform(put("/api/v1/products/{id}", productId)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(new ProductRequest(
+                                    "Burger", "Cheese burger", new BigDecimal("25.90"), "food"))))
+                    .andExpect(status().isNotFound());
+        }
+
+        @Test
+        @DisplayName("returns 400 for an invalid product and never reaches the service")
+        void shouldRejectInvalidUpdates() throws Exception {
+            mockMvc.perform(put("/api/v1/products/{id}", productId)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(
+                                    new ProductRequest("", "desc", new BigDecimal("-1.00"), "food"))))
+                    .andExpect(status().isBadRequest());
+
+            verifyNoInteractions(productService);
+        }
+    }
+
+    @Nested
     @DisplayName("DELETE /api/v1/products/{id}")
     class DeleteProduct {
+
+        @Test
+        @DisplayName("returns 204 when the product is deleted")
+        void shouldReturn204() throws Exception {
+            mockMvc.perform(delete("/api/v1/products/{id}", productId))
+                    .andExpect(status().isNoContent());
+
+            verify(productService).delete(productId);
+        }
 
         @Test
         @DisplayName("returns 404 when the product does not exist")

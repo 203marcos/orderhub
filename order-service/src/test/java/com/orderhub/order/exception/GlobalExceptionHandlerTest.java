@@ -1,11 +1,16 @@
 package com.orderhub.order.exception;
 
+import feign.FeignException;
+import feign.Request;
+import feign.RequestTemplate;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.MethodParameter;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.MissingRequestHeaderException;
 
+import java.nio.charset.StandardCharsets;
+import java.util.Collections;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -50,6 +55,24 @@ class GlobalExceptionHandlerTest {
 
         assertThat(problem.getStatus()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE.value());
         assertThat(problem.getDetail()).doesNotContain("8082");
+    }
+
+    @Test
+    void shouldMapAnyOtherFeignFailureTo503WithoutNamingTheDownstream() {
+        // Not just the mapped clients' own exceptions (they fall back before reaching here):
+        // any FeignException that does escape must still read as "downstream unavailable",
+        // never as this service's own fault.
+        Request request = Request.create(Request.HttpMethod.GET, "/api/v1/payments/orders/x",
+                Collections.emptyMap(), null, StandardCharsets.UTF_8, new RequestTemplate());
+        FeignException ex = new FeignException.ServiceUnavailable(
+                "payment-service down", request, null, Collections.emptyMap());
+
+        ProblemDetail problem = handler.handleFeign(ex);
+
+        assertThat(problem.getStatus()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE.value());
+        assertThat(problem.getDetail())
+                .isEqualTo("A downstream service is unavailable")
+                .doesNotContain("payment-service");
     }
 
     @Test

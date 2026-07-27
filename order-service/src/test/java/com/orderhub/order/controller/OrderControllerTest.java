@@ -1,6 +1,7 @@
 package com.orderhub.order.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.orderhub.order.client.PaymentClient;
 import com.orderhub.order.dto.OrderResponse;
 import com.orderhub.order.entity.OrderStatus;
 import com.orderhub.order.exception.OrderNotFoundException;
@@ -157,6 +158,42 @@ class OrderControllerTest {
                     .andExpect(status().isBadRequest());
 
             verify(orderService, never()).getOrder(any(), any());
+        }
+    }
+
+    @Nested
+    @DisplayName("GET /api/v1/orders/{id}/payment")
+    class GetOrderPayment {
+
+        @Test
+        @DisplayName("returns the payment detail for an order the caller owns")
+        void shouldReturnThePaymentDetail() throws Exception {
+            PaymentClient.PaymentInfo payment = new PaymentClient.PaymentInfo(
+                    UUID.randomUUID(), orderId, userId, new BigDecimal("31.80"), "APPROVED");
+            when(orderService.getOrderPayment(orderId, userId)).thenReturn(payment);
+
+            mockMvc.perform(get("/api/v1/orders/{id}/payment", orderId).header("X-User-Id", userId))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.orderId").value(orderId.toString()))
+                    .andExpect(jsonPath("$.status").value("APPROVED"));
+        }
+
+        @Test
+        @DisplayName("returns 404 when the order does not exist or is not the caller's")
+        void shouldReturn404() throws Exception {
+            when(orderService.getOrderPayment(orderId, userId)).thenThrow(new OrderNotFoundException(orderId));
+
+            mockMvc.perform(get("/api/v1/orders/{id}/payment", orderId).header("X-User-Id", userId))
+                    .andExpect(status().isNotFound());
+        }
+
+        @Test
+        @DisplayName("returns 400 when the gateway's identity header is missing")
+        void shouldRejectARequestWithoutIdentity() throws Exception {
+            mockMvc.perform(get("/api/v1/orders/{id}/payment", orderId))
+                    .andExpect(status().isBadRequest());
+
+            verifyNoInteractions(orderService);
         }
     }
 
