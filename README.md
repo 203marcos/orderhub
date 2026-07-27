@@ -1,205 +1,154 @@
 # OrderHub — Distributed Order Processing Platform
 
-Production-grade Java microservices portfolio project demonstrating event-driven architecture, distributed tracing, and cloud-native deployment patterns.
+A portfolio project showing how to build a small commerce domain as **event-driven Java microservices** — with synchronous and asynchronous communication, resilience, and full observability, kept deliberately focused rather than over-engineered.
+
+> 📐 Full design rationale, diagrams, and a new-developer guide: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**
 
 ## Architecture
 
-```
-                           ┌─────────────────────────────────────────────┐
-                           │              api-gateway :8080               │
-                           │     Spring Cloud Gateway + JWT validation     │
-                           └──────────┬──────────────────────────────────┘
-                                      │  routes validated requests
-                 ┌────────────────────┼──────────────────────┐
-                 │                    │                       │
-        ┌────────▼──────┐   ┌────────▼──────┐   ┌───────────▼──────┐
-        │ auth-service  │   │catalog-service│   │  order-service   │
-        │    :8081      │   │    :8082      │   │      :8083       │
-        │  JWT + RBAC   │   │ Redis cache   │   │  Kafka producer  │
-        │  PostgreSQL   │   │ PostgreSQL    │   │  OpenFeign+CB    │
-        └───────────────┘   └───────────────┘   └────────┬─────────┘
-                                                          │ order.created
-                                                ┌─────────▼─────────────────┐
-                                                │      Apache Kafka          │
-                                                └──┬──────────────────────┬─┘
-                                                   │ payment.approved/     │
-                                          ┌────────▼──────┐   ┌───────────▼──────┐
-                                          │payment-service│   │notification-svc  │
-                                          │    :8084      │   │     :8085        │
-                                          │  Saga pattern │   │  Spring Mail     │
-                                          │  PostgreSQL   │   │  Mailhog (dev)   │
-                                          └───────────────┘   └──────────────────┘
+```mermaid
+flowchart TB
+    client([Client]) --> gw["api-gateway :8080<br/>JWT validation + routing"]
+    gw --> auth[auth-service :8081]
+    gw --> catalog[catalog-service :8082]
+    gw --> order[order-service :8083]
+    gw --> payment[payment-service :8084]
+
+    order -- "sync REST (Feign, circuit breaker)" --> catalog
+    order -- "order.created" --> kafka{{Kafka}}
+    kafka -- "order.created" --> payment
+    payment -- "payment.approved / failed" --> kafka
+    kafka -- "payment.*" --> order
+    kafka -- "payment.approved" --> notif[notification-service :8085]
+    notif --> mail[Mailhog]
 ```
 
-**Event flow (Saga choreography):**
-1. `POST /api/v1/orders` → order-service persists order (PENDING) → publishes `order.created`
-2. payment-service consumes → processes → publishes `payment.approved` or `payment.failed`
-3. order-service updates status (CONFIRMED / PAYMENT_FAILED)
-4. notification-service sends confirmation email
+**Order lifecycle (choreography Saga):**
+1. `POST /api/v1/orders` → order-service prices items from the catalog, saves the order as `PENDING`, publishes `order.created`.
+2. payment-service consumes it, decides the payment, publishes `payment.approved` or `payment.failed`.
+3. order-service consumes the result → `CONFIRMED` / `PAYMENT_FAILED`; notification-service emails the customer.
 
-## Tech Stack
+## Tech stack
 
 | Layer | Technology |
 |---|---|
 | **Runtime** | Java 21, Spring Boot 3.4.1, Spring Cloud 2024.0 |
-| **API Gateway** | Spring Cloud Gateway, JJWT 0.12 |
-| **Messaging** | Apache Kafka — topics: `order.created`, `payment.approved`, `payment.failed` |
-| **Persistence** | PostgreSQL 16 (per-service DB), Redis 7 (catalog cache), Flyway migrations |
-| **Resilience** | Resilience4j (circuit breaker + fallback on catalog calls from order-service) |
-| **Service comms** | Spring Cloud OpenFeign (order → catalog, sync) + Kafka (async/event-driven) |
-| **Observability** | Micrometer + Prometheus, Grafana dashboards, Loki logs, OpenTelemetry + Jaeger tracing |
-| **Logging** | Structured JSON via logstash-logback-encoder → Loki |
-| **Testing** | JUnit 5, Mockito, Testcontainers (PostgreSQL + Kafka + Redis), Pact (contract tests) |
-| **Quality** | JaCoCo ≥ 80% line coverage enforced on every module |
-| **API Docs** | SpringDoc OpenAPI — Swagger UI aggregated at gateway |
-| **Build** | Maven multi-module, Docker Compose (dev), GitHub Actions CI/CD |
-| **Deploy** | Kubernetes manifests + Helm chart (all 6 services) |
+| **API Gateway** | Spring Cloud Gateway, JJWT 0.12 (JWT validated once at the edge) |
+| **Messaging** | Apache Kafka — topics `order.created`, `payment.approved`, `payment.failed` |
+| **Persistence** | PostgreSQL 16 (one DB per stateful service), Redis 7 (catalog cache-aside), Flyway migrations |
+| **Service comms** | Spring Cloud OpenFeign (sync) + Kafka (async) |
+| **Resilience** | Resilience4j circuit breaker + fallbacks on the Feign clients |
+| **Observability** | Micrometer → Prometheus + Grafana; JSON logs → Loki (Promtail); OpenTelemetry → Jaeger |
+| **Testing** | JUnit 5, Mockito, Testcontainers (PostgreSQL/Kafka/Redis), Pact (consumer + provider) |
+| **API docs** | SpringDoc OpenAPI / Swagger UI per service |
+| **Build & deploy** | Maven multi-module, Docker Compose, GitHub Actions CI |
 
-## Key Design Decisions
+## Running locally
 
-**Saga choreography over orchestration** — no central coordinator; each service reacts to events and publishes its own. Simpler to scale and avoids a single point of failure.
-
-**Per-service database** — auth, catalog, order, and payment each own their schema. Cross-service reads go through the API, never direct DB access. Enables independent deployments.
-
-**JWT at gateway** — tokens are validated once at the gateway; downstream services trust the injected `X-User-Id` / `X-User-Email` headers. Removes security coupling from business services.
-
-**Circuit breaker on catalog calls** — order-service calls catalog-service via Feign with Resilience4j. On failure the fallback uses the price provided in the request, so order creation degrades gracefully.
-
-## Project Structure
-
-```
-orderhub/
-├── api-gateway/                Spring Cloud Gateway + JWT filter
-├── auth-service/               Register/login, RBAC, Flyway migration
-├── catalog-service/            Product CRUD, Redis cache (10 min TTL)
-├── order-service/              Order creation, Kafka producer, Saga consumer
-├── payment-service/            OrderCreated consumer, PaymentApproved/Failed producer
-├── notification-service/       PaymentApproved consumer, email via Spring Mail
-├── infra/
-│   ├── prometheus/             Scrape config for all 6 services
-│   ├── grafana/provisioning/   Pre-provisioned Prometheus + Loki + Jaeger datasources
-│   ├── loki/                   Loki config for log aggregation
-│   └── promtail/               Log shipping from containers
-├── k8s/                        Kubernetes manifests (Deployment + Service per microservice)
-├── helm/orderhub/              Helm chart with configurable values.yaml
-└── .github/workflows/ci.yml    Build → unit tests → integration tests → Trivy scan
-```
-
-## Running Locally
-
-**Prerequisites:** Docker, Java 21, Maven 3.9+
+**Prerequisites:** Docker (Docker Desktop with BuildKit). Java 21 + Maven are only needed to run tests or a service outside Docker.
 
 ```bash
-# 1. Start all infrastructure (Kafka, PostgreSQL x4, Redis, Mailhog, Prometheus, Grafana, Loki, Jaeger)
-docker compose up -d
+# Build every image and start the whole system (infra + 6 services)
+docker compose up -d --build
 
-# 2. Build all modules
-mvn clean package -DskipTests
-
-# 3. Run a service (example)
-mvn spring-boot:run -pl auth-service
+# Tail logs / stop
+docker compose logs -f order-service
+docker compose down
 ```
 
-**Infrastructure endpoints:**
+The first build compiles all modules inside the images, so it takes a few minutes; subsequent starts are fast.
 
 | Tool | URL |
 |---|---|
-| API Gateway | http://localhost:8080 |
-| Swagger UI (aggregated) | http://localhost:8080/swagger-ui.html |
+| API Gateway (entry point) | http://localhost:8080 |
+| Swagger UI (per service) | http://localhost:808x/swagger-ui.html |
 | Grafana | http://localhost:3000 (admin / admin) |
 | Prometheus | http://localhost:9090 |
-| Jaeger UI | http://localhost:16686 |
+| Jaeger (traces) | http://localhost:16686 |
 | Mailhog (dev email) | http://localhost:8025 |
+
+## Example: end to end
+
+```bash
+# 1. Register and capture the JWT
+TOKEN=$(curl -s -X POST http://localhost:8080/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"marcos@orderhub.com","password":"password123","firstName":"Marcos","lastName":"Dias"}' \
+  | jq -r .token)
+
+# 2. Create a product (returns its id)
+PID=$(curl -s -X POST http://localhost:8080/api/v1/products \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"name":"Burger","description":"Cheese burger","price":25.90,"category":"food"}' \
+  | jq -r .id)
+
+# 3. Place an order — the client sends only productId + quantity; the server prices it
+curl -s -X POST http://localhost:8080/api/v1/orders \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d "{\"items\":[{\"productId\":\"$PID\",\"quantity\":2}]}" | jq
+
+# 4. A moment later, the Saga has run — check the payment result
+#    (order status becomes CONFIRMED; an email lands in Mailhog)
+curl -s http://localhost:8080/api/v1/orders/{orderId}/payment \
+  -H "Authorization: Bearer $TOKEN" | jq
+```
+
+## API reference
+
+All traffic goes through the gateway. Protected routes require `Authorization: Bearer <token>`.
+
+**Auth** — `POST /auth/register`, `POST /auth/login` → `{ token, tokenType, email, role }`
+
+**Catalog** — `GET /api/v1/products` (paginated), `GET /api/v1/products/{id}`, `GET /api/v1/products/category/{cat}`, and `POST` / `PUT` / `DELETE` (auth required)
+
+**Orders** *(auth required)*
+```
+POST /api/v1/orders            body: { "items": [ { "productId", "quantity" } ] }  → 201, triggers the Saga
+GET  /api/v1/orders/{id}       order with status
+GET  /api/v1/orders/{id}/payment   payment detail (sync call to payment-service, Pact-tested)
+GET  /api/v1/orders/my         current user's orders
+```
+
+**Payments** *(auth required)* — `GET /api/v1/payments/{id}`, `GET /api/v1/payments/order/{orderId}`
 
 ## Testing
 
 ```bash
-# Unit tests (all modules)
-mvn test
-
-# Integration tests — spins up real Kafka + PostgreSQL via Testcontainers
-mvn verify -Dgroups=integration
-
-# Coverage report (target/site/jacoco/index.html per module)
-mvn verify jacoco:report
-
-# Single service
-mvn test -pl order-service
+mvn test                              # unit + contract tests (all modules)
+mvn verify -pl order-service -Dgroups=integration   # Testcontainers (needs Docker)
+mvn verify -pl catalog-service jacoco:report        # coverage report
 ```
 
-**Test strategy:**
-- Unit tests mock repositories and Kafka producers (Mockito)
-- Integration tests use Testcontainers for real PostgreSQL and Kafka — no mocks of infrastructure
-- Pact contract tests: order-service (consumer) defines the expected API contract; payment-service (provider) verifies it on every build
+- **Unit** — Mockito for services, filters, and resilience fallbacks.
+- **Integration** — `@Tag("integration")` Testcontainers spin up real PostgreSQL/Kafka/Redis; no infrastructure is mocked.
+- **Contract** — Pact: `order-service` (consumer) pins the `GET /payments/order/{id}` contract it really calls; `payment-service` (provider) verifies it.
 
-## CI/CD
+## Key design decisions
 
-GitHub Actions pipeline (`.github/workflows/ci.yml`):
+- **Async for commands, sync for queries.** Payment runs after the order exists and fans out to multiple consumers → Kafka. Reading a price or a payment detail is immediate → REST/Feign.
+- **Never trust a client price.** The order request carries only `productId` + `quantity`; the server resolves the authoritative price from the catalog and computes the total.
+- **Circuit breaker where it works.** Resilience4j wraps the Feign proxies. Catalog down → fail fast (`503`, you can't price blindly); payment query down → degrade to `UNKNOWN` status.
+- **Consistent errors.** Every service returns RFC 7807 `application/problem+json`.
+- **One DB per service, JWT once at the gateway.** Boundaries are enforced; downstream services trust forwarded `X-User-*` headers.
+
+Full trade-off discussion in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## Project structure
 
 ```
-push → build (mvn package) → unit tests → integration tests → Trivy security scan
+orderhub/
+├── api-gateway/            Spring Cloud Gateway + JWT filter
+├── auth-service/           Register/login, JWT, PostgreSQL
+├── catalog-service/        Product CRUD, Redis cache-aside
+├── order-service/          Order creation, Feign clients, Kafka producer + Saga consumer
+├── payment-service/        order.created consumer, payment.* producer, Pact provider
+├── notification-service/   payment.approved consumer, email via Mailhog
+├── infra/                  prometheus, grafana, loki, promtail configs
+├── k8s/ · helm/            Kubernetes manifests and Helm chart
+├── docs/ARCHITECTURE.md    Full architecture guide
+└── docker-compose.yml      The entire system, one command
 ```
 
-## Kubernetes Deployment
+## Roadmap
 
-```bash
-# Apply namespace + infra
-kubectl apply -f k8s/namespace.yaml
-kubectl apply -f k8s/infra/
-
-# Apply all services
-kubectl apply -f k8s/auth-service/
-kubectl apply -f k8s/catalog-service/
-kubectl apply -f k8s/order-service/
-kubectl apply -f k8s/payment-service/
-kubectl apply -f k8s/notification-service/
-kubectl apply -f k8s/api-gateway/
-
-# Or deploy everything with Helm
-helm install orderhub ./helm/orderhub --namespace orderhub --create-namespace
-```
-
-## API Reference
-
-All requests go through the gateway at `http://localhost:8080`. Protected routes require `Authorization: Bearer <token>`.
-
-**Auth**
-```
-POST /auth/register   { "email", "password", "firstName", "lastName" }
-POST /auth/login      { "email", "password" }  →  { "token", "expiresIn", "email", "role" }
-```
-
-**Catalog** *(public)*
-```
-GET  /api/v1/products                  paginated list of available products
-GET  /api/v1/products/{id}
-GET  /api/v1/products/category/{cat}
-POST /api/v1/products                  create (auth required)
-PUT  /api/v1/products/{id}             update (auth required)
-DELETE /api/v1/products/{id}           delete (auth required)
-```
-
-**Orders** *(auth required)*
-```
-POST /api/v1/orders         create order  →  triggers Saga
-GET  /api/v1/orders/{id}    get by id
-GET  /api/v1/orders/my      list my orders
-```
-
-**Payments** *(auth required)*
-```
-GET /api/v1/payments/{id}
-GET /api/v1/payments/order/{orderId}
-```
-
-## Environment Variables
-
-| Variable | Default | Used by |
-|---|---|---|
-| `JWT_SECRET` | base64 key | api-gateway, auth-service |
-| `DB_URL` | `jdbc:postgresql://localhost:543x/...` | all DB services |
-| `DB_USER` / `DB_PASS` | `orderhub` / `orderhub123` | all DB services |
-| `KAFKA_SERVERS` | `localhost:9092` | order, payment, notification |
-| `REDIS_HOST` / `REDIS_PORT` | `localhost` / `6379` | catalog-service |
-| `MAIL_HOST` / `MAIL_PORT` | `localhost` / `1025` | notification-service |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | all services |
+Seed data + HTTP collection · committed Grafana dashboards · idempotent consumers + dead-letter topic · outbox pattern for reliable publishing · consolidate k8s/Helm · Pact Broker in CI. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#10-evolution-roadmap).
