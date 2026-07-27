@@ -1,6 +1,7 @@
 package com.orderhub.order.service;
 
 import com.orderhub.order.client.CatalogClient;
+import com.orderhub.order.client.PaymentClient;
 import com.orderhub.order.dto.CreateOrderRequest;
 import com.orderhub.order.dto.OrderResponse;
 import com.orderhub.order.entity.Order;
@@ -24,11 +25,14 @@ public class OrderService {
     private final OrderRepository orderRepository;
     private final OrderProducer orderProducer;
     private final CatalogClient catalogClient;
+    private final PaymentClient paymentClient;
 
-    public OrderService(OrderRepository orderRepository, OrderProducer orderProducer, CatalogClient catalogClient) {
+    public OrderService(OrderRepository orderRepository, OrderProducer orderProducer,
+                        CatalogClient catalogClient, PaymentClient paymentClient) {
         this.orderRepository = orderRepository;
         this.orderProducer = orderProducer;
         this.catalogClient = catalogClient;
+        this.paymentClient = paymentClient;
     }
 
     @Transactional
@@ -62,6 +66,14 @@ public class OrderService {
         return orderRepository.findByUserId(userId).stream()
                 .map(OrderResponse::from)
                 .toList();
+    }
+
+    /** Fetches the payment detail for an order via a synchronous call to payment-service. */
+    public PaymentClient.PaymentInfo getOrderPayment(UUID orderId) {
+        if (!orderRepository.existsById(orderId)) {
+            throw new OrderNotFoundException(orderId);
+        }
+        return paymentClient.getPaymentByOrder(orderId);
     }
 
     @Transactional

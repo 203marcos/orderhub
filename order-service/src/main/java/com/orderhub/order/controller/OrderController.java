@@ -1,5 +1,6 @@
 package com.orderhub.order.controller;
 
+import com.orderhub.order.client.PaymentClient;
 import com.orderhub.order.dto.CreateOrderRequest;
 import com.orderhub.order.dto.OrderResponse;
 import com.orderhub.order.service.OrderService;
@@ -33,6 +34,11 @@ public class OrderController {
     @GetMapping("/{id}")
     public ResponseEntity<OrderResponse> getOrder(@PathVariable UUID id) {
         return ResponseEntity.ok(orderService.getOrder(id));
+    }
+
+    @GetMapping("/{id}/payment")
+    public ResponseEntity<PaymentClient.PaymentInfo> getOrderPayment(@PathVariable UUID id) {
+        return ResponseEntity.ok(orderService.getOrderPayment(id));
     }
 
     @GetMapping("/my")

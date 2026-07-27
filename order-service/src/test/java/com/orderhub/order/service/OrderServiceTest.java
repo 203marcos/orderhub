@@ -1,6 +1,7 @@
 package com.orderhub.order.service;
 
 import com.orderhub.order.client.CatalogClient;
+import com.orderhub.order.client.PaymentClient;
 import com.orderhub.order.dto.CreateOrderRequest;
 import com.orderhub.order.dto.OrderItemRequest;
 import com.orderhub.order.dto.OrderResponse;
@@ -34,6 +35,7 @@ class OrderServiceTest {
     @Mock OrderRepository orderRepository;
     @Mock OrderProducer orderProducer;
     @Mock CatalogClient catalogClient;
+    @Mock PaymentClient paymentClient;
 
     @InjectMocks OrderService orderService;
 
@@ -100,6 +102,29 @@ class OrderServiceTest {
         when(orderRepository.findById(orderId)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> orderService.getOrder(orderId))
+                .isInstanceOf(OrderNotFoundException.class);
+    }
+
+    @Test
+    void shouldGetOrderPayment() {
+        UUID orderId = UUID.randomUUID();
+        when(orderRepository.existsById(orderId)).thenReturn(true);
+        PaymentClient.PaymentInfo info = new PaymentClient.PaymentInfo(
+                UUID.randomUUID(), orderId, userId, new BigDecimal("59.98"), "APPROVED");
+        when(paymentClient.getPaymentByOrder(orderId)).thenReturn(info);
+
+        PaymentClient.PaymentInfo result = orderService.getOrderPayment(orderId);
+
+        assertThat(result.status()).isEqualTo("APPROVED");
+        assertThat(result.amount()).isEqualByComparingTo("59.98");
+    }
+
+    @Test
+    void shouldThrowWhenGettingPaymentForUnknownOrder() {
+        UUID orderId = UUID.randomUUID();
+        when(orderRepository.existsById(orderId)).thenReturn(false);
+
+        assertThatThrownBy(() -> orderService.getOrderPayment(orderId))
                 .isInstanceOf(OrderNotFoundException.class);
     }
 
