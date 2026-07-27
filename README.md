@@ -15,18 +15,30 @@ flowchart TB
     gw --> payment[payment-service :8084]
 
     order -- "sync REST (Feign, circuit breaker)" --> catalog
-    order -- "order.created" --> kafka{{Kafka}}
+    order -- "outbox relay" --> kafka{{"Kafka (KRaft)"}}
     kafka -- "order.created" --> payment
-    payment -- "payment.approved / failed" --> kafka
+    payment -- "outbox relay" --> kafka
     kafka -- "payment.*" --> order
     kafka -- "payment.approved" --> notif[notification-service :8085]
     notif --> mail[Mailhog]
 ```
 
+Only the gateway binds a host port. The services trust the identity headers the gateway
+derives from the JWT, so publishing them on localhost would let anyone forge those headers.
+
 **Order lifecycle (choreography Saga):**
-1. `POST /api/v1/orders` → order-service prices items from the catalog, saves the order as `PENDING`, publishes `order.created`.
-2. payment-service consumes it, decides the payment, publishes `payment.approved` or `payment.failed`.
+1. `POST /api/v1/orders` → order-service prices items from the catalog, then saves the order as `PENDING` **and** an `OrderCreated` outbox row in one transaction.
+2. The outbox relay publishes `order.created`; payment-service consumes it, decides the payment, and stages `payment.approved` or `payment.failed` in its own outbox.
 3. order-service consumes the result → `CONFIRMED` / `PAYMENT_FAILED`; notification-service emails the customer.
+
+**Why it survives failure:**
+
+| Failure | What happens |
+|---|---|
+| Rollback after the event was "sent" | Impossible — the event is a row in the same transaction, so it rolls back with the order. |
+| Broker down when an order is placed | The order still commits; the relay retries until the broker returns. |
+| Kafka redelivers an event | Consumers are idempotent: payment-service skips an order it has already paid, and order-service only moves an order out of `PENDING`. |
+| A record cannot be processed at all | Three retries, then it is parked on `<topic>.dlt` instead of being dropped. |
 
 ## Tech stack
 
@@ -34,7 +46,8 @@ flowchart TB
 |---|---|
 | **Runtime** | Java 21, Spring Boot 3.4.1, Spring Cloud 2024.0 |
 | **API Gateway** | Spring Cloud Gateway, JJWT 0.12 (JWT validated once at the edge) |
-| **Messaging** | Apache Kafka — topics `order.created`, `payment.approved`, `payment.failed` |
+| **Messaging** | Apache Kafka in KRaft mode (no ZooKeeper) — topics `order.created`, `payment.approved`, `payment.failed`, plus a `.dlt` per topic |
+| **Event reliability** | Transactional outbox + polling relay (`SKIP LOCKED`), idempotent consumers, dead-letter topics |
 | **Persistence** | PostgreSQL 16 (one DB per stateful service), Redis 7 (catalog cache-aside), Flyway migrations |
 | **Service comms** | Spring Cloud OpenFeign (sync) + Kafka (async) |
 | **Resilience** | Resilience4j circuit breaker + fallbacks on the Feign clients |
@@ -140,7 +153,7 @@ orderhub/
 ├── api-gateway/            Spring Cloud Gateway + JWT filter
 ├── auth-service/           Register/login, JWT, PostgreSQL
 ├── catalog-service/        Product CRUD, Redis cache-aside
-├── order-service/          Order creation, Feign clients, Kafka producer + Saga consumer
+├── order-service/          Order creation, Feign clients, outbox relay + Saga consumer
 ├── payment-service/        order.created consumer, payment.* producer, Pact provider
 ├── notification-service/   payment.approved consumer, email via Mailhog
 ├── infra/                  prometheus, grafana, loki, promtail configs
@@ -151,4 +164,4 @@ orderhub/
 
 ## Roadmap
 
-Seed data + HTTP collection · committed Grafana dashboards · idempotent consumers + dead-letter topic · outbox pattern for reliable publishing · consolidate k8s/Helm · Pact Broker in CI. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#10-evolution-roadmap).
+Seed data + HTTP collection · committed Grafana dashboards · compensating transaction (stock reservation released on `payment.failed`) · rate limiting at the gateway · consolidate k8s/Helm · Pact Broker in CI. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#10-evolution-roadmap).

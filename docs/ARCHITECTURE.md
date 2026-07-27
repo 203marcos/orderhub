@@ -146,16 +146,57 @@ stateDiagram-v2
     PAYMENT_FAILED --> [*]
 
     note right of PENDING
-        order-service publishes order.created
-        payment-service reacts and publishes
+        order-service stages order.created in its outbox
+        payment-service reacts and stages
         payment.approved or payment.failed
         order-service + notification-service react
     end note
 ```
 
+Only a `PENDING` order changes state. Kafka gives no ordering guarantee *between*
+`payment.approved` and `payment.failed` — they are separate topics — so a redelivered or
+late event must not be able to flip an order that has already settled.
+
+### 2.4.1 Reliable publishing — the transactional outbox
+
+Writing to PostgreSQL and to Kafka in the same method is a dual write: the two have no
+shared transaction, so either can succeed while the other fails. Instead, each service
+appends the event to an `outbox_events` row **inside the business transaction**:
+
+```
+BEGIN
+  INSERT INTO orders ...
+  INSERT INTO outbox_events (topic, payload, published_at = NULL) ...
+COMMIT                          ← the order and its event are now atomic
+        ↓
+OutboxPublisher (every 500 ms)
+  SELECT ... WHERE published_at IS NULL
+  ORDER BY created_at
+  FOR UPDATE SKIP LOCKED        ← safe with several replicas
+        ↓
+  send to Kafka, then set published_at
+```
+
+Two consequences worth being explicit about:
+
+- **`SKIP LOCKED`** is what allows more than one replica to run the relay. Without it two
+  pollers would either block on each other or publish the same row twice.
+- **Delivery is at-least-once, not exactly-once.** The send can succeed and the transaction
+  marking the row published can still fail, so the event goes out again on the next tick.
+  That is deliberate: the alternative (mark first, send after) loses events. The duplicate
+  guards in the consumers are what make it safe.
+
+Records that fail even after three retries are parked on `<topic>.dlt` by a
+`DeadLetterPublishingRecoverer` rather than being logged and dropped.
+
 ### 2.5 Infrastructure
 
-Everything runs from one `docker compose up -d --build`: four PostgreSQL instances (one per stateful service), Redis, Kafka + Zookeeper, Mailhog, and the observability stack (Prometheus, Grafana, Loki + Promtail, Jaeger). All six apps are containerized and join the same network, so metrics, logs, and traces are collected automatically.
+Everything runs from one `docker compose up -d --build`: four PostgreSQL instances (one per stateful service), Redis, a single-node Kafka broker in KRaft mode (ZooKeeper was removed in Kafka 4.0), Mailhog, and the observability stack (Prometheus, Grafana, Loki + Promtail, Jaeger). All six apps are containerized and join the same network, so metrics, logs, and traces are collected automatically.
+
+Only `api-gateway` binds a host port. The downstream services trust the `X-User-Id` /
+`X-User-Email` / `X-User-Role` headers the gateway derives from the JWT, so exposing them on
+localhost would let anyone bypass authentication by setting those headers by hand. They stay
+reachable to each other — and to Prometheus — over the compose network.
 
 ---
 
@@ -172,7 +213,8 @@ order-service
 ├── dto          Request/response records (the API contract)
 ├── client       Feign clients to other services (+ resilience fallbacks)
 ├── event        Event records this service produces/consumes over Kafka
-├── kafka        Kafka producers and @KafkaListener consumers
+├── kafka        @KafkaListener consumers
+├── outbox       Outbox entity/repository + the relay that publishes to Kafka
 ├── exception    Domain exceptions + GlobalExceptionHandler (RFC 7807)
 └── OrderServiceApplication.java
 ```
@@ -287,7 +329,10 @@ Relationships only exist **within** a service. Cross-service links (e.g., an ord
 | **Repository** | `repository/*` | Abstract data access (Spring Data JPA) |
 | **Service layer** | `service/*` | Hold business rules and transaction boundaries |
 | **Static factory** | `*.from(entity)` mappers | Simple entity → DTO mapping without a framework |
-| **Event-driven / Choreography Saga** | Kafka producers/consumers | Async order lifecycle across services |
+| **Event-driven / Choreography Saga** | `kafka/*` consumers + `outbox/*` | Async order lifecycle across services |
+| **Transactional Outbox** | `outbox/*` in order & payment | Publish events without a DB↔Kafka dual write |
+| **Idempotent consumer** | duplicate guards in the saga handlers | Absorb Kafka's at-least-once redelivery |
+| **Dead-letter topic** | `DefaultErrorHandler` in each consumer | Keep poison records for inspection instead of dropping them |
 | **Circuit Breaker + Fallback** | `client/*Fallback` | Contain downstream failures |
 | **Cache-aside** | `catalog-service` Redis | Speed up read-heavy product lookups |
 | **API Gateway** | `api-gateway` | Single entry point + JWT validation |
@@ -327,13 +372,15 @@ Relationships only exist **within** a service. Cross-service links (e.g., an ord
 - Rate limiting at the gateway.
 
 **Intermediate**
-- Idempotent Kafka consumers (dedupe by event id) and a dead-letter topic.
 - Bundle cluster infrastructure (Postgres/Kafka/Redis/Jaeger) as Helm subcharts so `helm install` is self-contained, matching what docker-compose already does locally.
 - Publish the OpenAPI spec aggregated at the gateway.
+- Rate limiting at the gateway (Spring Cloud Gateway's Redis `RequestRateLimiter`).
+- Prune published outbox rows on a schedule so the table does not grow without bound.
 
 **Advanced**
 - Replace the choreography Saga with an orchestrated one (state machine) once the flow grows beyond order → payment.
-- Outbox pattern for reliable event publishing (avoid dual-write between DB and Kafka).
+- A real compensating transaction: reserve stock in catalog-service on `order.created` and release it on `payment.failed`. Today the saga only moves order status, which is the weakest part of the model.
+- Swap the polling relay for CDC (Debezium reading the outbox table) to drop the poll latency and the extra database load.
 - Contract tests in CI publishing to a Pact Broker instead of copying files.
 
 These are deferred because they add operational or conceptual weight that the current, deliberately-focused scope does not yet need.
