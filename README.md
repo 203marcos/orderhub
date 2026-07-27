@@ -48,6 +48,7 @@ derives from the JWT, so publishing them on localhost would let anyone forge tho
 | **API Gateway** | Spring Cloud Gateway, JJWT 0.12 (JWT validated once at the edge) |
 | **Messaging** | Apache Kafka in KRaft mode (no ZooKeeper) — topics `order.created`, `payment.approved`, `payment.failed`, plus a `.dlt` per topic |
 | **Event reliability** | Transactional outbox + polling relay (`SKIP LOCKED`), idempotent consumers, dead-letter topics |
+| **Testing** | JUnit 5 (`@Nested`, `@ParameterizedTest`), AssertJ, Mockito, Testcontainers, Pact, ArchUnit |
 | **Persistence** | PostgreSQL 16 (one DB per stateful service), Redis 7 (catalog cache-aside), Flyway migrations |
 | **Service comms** | Spring Cloud OpenFeign (sync) + Kafka (async) |
 | **Resilience** | Resilience4j circuit breaker + fallbacks on the Feign clients |
@@ -127,14 +128,24 @@ GET  /api/v1/orders/my         current user's orders
 ## Testing
 
 ```bash
-mvn test                              # unit + contract tests (all modules)
-mvn verify -pl order-service -Dgroups=integration   # Testcontainers (needs Docker)
-mvn verify -pl catalog-service jacoco:report        # coverage report
+./mvnw verify                    # unit + slice + contract + architecture tests, and the coverage gate
+./mvnw verify -DexcludedGroups=  # also runs the Testcontainers integration tests (needs Docker)
 ```
 
-- **Unit** — Mockito for services, filters, and resilience fallbacks.
-- **Integration** — `@Tag("integration")` Testcontainers spin up real PostgreSQL/Kafka/Redis; no infrastructure is mocked.
-- **Contract** — Pact: `order-service` (consumer) pins the `GET /payments/order/{id}` contract it really calls; `payment-service` (provider) verifies it.
+`./mvnw verify` passes the 80% JaCoCo gate without Docker — the integration tests add
+end-to-end confidence, they are not load-bearing for coverage.
+
+| Kind | What it covers |
+|---|---|
+| **Unit** | Services, the saga's idempotency guards, the outbox relay, resilience fallbacks. |
+| **Slice** (`@WebMvcTest`) | The HTTP edge: validation, status codes, JSON contract — no database. |
+| **Architecture** (ArchUnit) | Layering, no service-to-service package dependency, entities never leaving the service layer, only the outbox publishing to Kafka. |
+| **Contract** (Pact) | `order-service` pins the `GET /payments/order/{id}` contract it really calls; `payment-service` verifies it. |
+| **Integration** (Testcontainers) | Real PostgreSQL/Kafka/Redis, tagged `@Tag("integration")`. No infrastructure is mocked. |
+
+The architecture tests are the ones worth a second look: the rules in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) are executable, so the diagram cannot quietly
+drift from the code.
 
 ## Key design decisions
 
