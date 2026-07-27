@@ -48,20 +48,54 @@ jobs:
       - name: Build and install all modules
         run: mvn -B clean install -DskipTests --no-transfer-progress
 
-      # `-am` (--also-make) keeps each command self-contained by pulling the modules these
-      # depend on into the reactor, so this step does not rely on the one above having run.
-      # Consumer (order-service) generates the Pact contract into target/pacts.
-      - name: Test gateway, auth, catalog, order (unit + integration)
-        run: mvn -B verify -pl api-gateway,auth-service,catalog-service,order-service -am -DexcludedGroups= --no-transfer-progress
+      # Everything except the Docker-backed tests, across the whole reactor. A logic error
+      # fails here in about a minute instead of after waiting for containers to start.
+      - name: Unit, slice, architecture and contract tests
+        run: mvn -B test --no-transfer-progress
 
-      # The provider must verify the contract the consumer just produced.
+      # The provider verifies the contract the consumer produced in the step above.
       - name: Publish Pact contract to the provider
+        if: ${{ !cancelled() }}
         run: |
           mkdir -p payment-service/pacts
           cp order-service/target/pacts/*.json payment-service/pacts/
 
-      - name: Test payment, notification (unit + integration + Pact provider)
-        run: mvn -B verify -pl payment-service,notification-service -am -DexcludedGroups= --no-transfer-progress
+      # From here each module is verified on its own, with the @Tag("integration")
+      # Testcontainers tests enabled and the JaCoCo gate applied.
+      #
+      # One step per module so a red build names the service straight away, and
+      # `!cancelled()` so they all run: an unrelated failure in order-service should not hide
+      # the state of payment-service. A failed step still fails the job.
+      #
+      # `-am` pulls the shared modules these depend on into the reactor, keeping each command
+      # runnable on its own — copy any line and it works locally.
+      - name: Verify shared modules
+        if: ${{ !cancelled() }}
+        run: mvn -B verify -pl common-kafka,common-outbox --no-transfer-progress
+
+      - name: Verify api-gateway
+        if: ${{ !cancelled() }}
+        run: mvn -B verify -pl api-gateway -DexcludedGroups= --no-transfer-progress
+
+      - name: Verify auth-service (integration)
+        if: ${{ !cancelled() }}
+        run: mvn -B verify -pl auth-service -DexcludedGroups= --no-transfer-progress
+
+      - name: Verify catalog-service (integration)
+        if: ${{ !cancelled() }}
+        run: mvn -B verify -pl catalog-service -DexcludedGroups= --no-transfer-progress
+
+      - name: Verify order-service (integration)
+        if: ${{ !cancelled() }}
+        run: mvn -B verify -pl order-service -am -DexcludedGroups= --no-transfer-progress
+
+      - name: Verify payment-service (integration + Pact provider)
+        if: ${{ !cancelled() }}
+        run: mvn -B verify -pl payment-service -am -DexcludedGroups= --no-transfer-progress
+
+      - name: Verify notification-service
+        if: ${{ !cancelled() }}
+        run: mvn -B verify -pl notification-service -am -DexcludedGroups= --no-transfer-progress
 
       - name: Upload JaCoCo coverage
         if: always()
@@ -69,6 +103,15 @@ jobs:
         with:
           name: jacoco-coverage
           path: '**/target/site/jacoco/'
+
+      # Surefire's reports say which assertion failed; the container logs say why. Without
+      # these, a Testcontainers failure is only reproducible by pushing again.
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: '**/target/surefire-reports/'
 
   # ────────────────────────────────────────────────────────────────────────────
   # 2) SECURITY SCAN

@@ -4,6 +4,7 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.kafka.KafkaConnectionDetails;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 import org.springframework.boot.ssl.SslBundles;
 import org.springframework.context.annotation.Bean;
@@ -32,12 +33,25 @@ public class KafkaReliabilityConfig {
      * A JSON serializer here would wrap both in a second layer of quoting.
      *
      * <p>Declaring this template makes Spring Boot's auto-configured one back off, which is the
-     * intent — no code path sends an unserialized object.
+     * intent — no code path sends an unserialized object. Taking that over means also taking
+     * over what Boot's own producer factory does for us, hence {@code connectionDetails} below.
+     *
+     * @param connectionDetails where the broker actually is. This is <em>not</em> the same as
+     *     {@code spring.kafka.bootstrap-servers}: Boot always publishes a
+     *     {@link KafkaConnectionDetails} bean, backed by that property in production but
+     *     replaced by Testcontainers when a test declares {@code @ServiceConnection}. Building
+     *     the producer from {@link KafkaProperties} alone silently ignores the override and
+     *     sends to the configured default instead of the container — which fails as
+     *     "Bootstrap broker localhost:9092 disconnected", far from its cause.
      */
     @Bean
     @ConditionalOnMissingBean(KafkaTemplate.class)
-    public KafkaTemplate<String, String> kafkaTemplate(KafkaProperties properties, SslBundles sslBundles) {
+    public KafkaTemplate<String, String> kafkaTemplate(KafkaProperties properties,
+                                                      KafkaConnectionDetails connectionDetails,
+                                                      SslBundles sslBundles) {
         Map<String, Object> producerProperties = properties.buildProducerProperties(sslBundles);
+        producerProperties.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG,
+                connectionDetails.getProducerBootstrapServers());
         producerProperties.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         producerProperties.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         return new KafkaTemplate<>(new DefaultKafkaProducerFactory<>(producerProperties));
