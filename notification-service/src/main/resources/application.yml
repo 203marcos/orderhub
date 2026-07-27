@@ -4,6 +4,9 @@ server:
 spring:
   application:
     name: notification-service
+  threads:
+    virtual:
+      enabled: true
   mail:
     host: ${MAIL_HOST:localhost}
     port: ${MAIL_PORT:1025}

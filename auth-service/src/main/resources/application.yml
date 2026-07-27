@@ -4,6 +4,9 @@ server:
 spring:
   application:
     name: auth-service
+  threads:
+    virtual:
+      enabled: true
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/auth_db}
     username: ${DB_USER:orderhub}

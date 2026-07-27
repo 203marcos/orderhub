@@ -4,6 +4,9 @@ server:
 spring:
   application:
     name: order-service
+  threads:
+    virtual:
+      enabled: true
   cloud:
     openfeign:
       circuitbreaker:
