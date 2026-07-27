@@ -424,20 +424,18 @@ Relationships only exist **within** a service. Cross-service links (e.g., an ord
 
 ## 10. Evolution roadmap
 
-**Simple**
-- Seed data for the catalog and a Postman/HTTP collection.
-- Grafana dashboards committed as provisioning (currently only datasources are).
-- Rate limiting at the gateway.
+**Landed** (formerly on this roadmap)
+- Postman collection with seeded admin, Grafana dashboards as provisioning, Swagger UI aggregated at the gateway.
+- Rate limiting at the gateway (Spring Cloud Gateway's Redis `RequestRateLimiter`, keyed per user with an IP fallback for `/auth`). Stated trade-off: `RedisRateLimiter` fails *open* — with Redis down, requests pass unthrottled rather than the API going dark; the gateway's readiness probe includes Redis so an orchestrator pulls such an instance from rotation.
+- The compensating transaction: stock reserved in catalog-service on `order.created`, released on `payment.failed` or `order.cancelled` (see §2.4.2), plus the PENDING-order watchdog that cancels timed-out orders.
 
 **Intermediate**
 - Bundle cluster infrastructure (Postgres/Kafka/Redis/Jaeger) as Helm subcharts so `helm install` is self-contained, matching what docker-compose already does locally.
-- Publish the OpenAPI spec aggregated at the gateway.
-- Rate limiting at the gateway (Spring Cloud Gateway's Redis `RequestRateLimiter`).
 - Prune published outbox rows on a schedule so the table does not grow without bound.
+- Publish `stock.rejected` from catalog-service so order-service can settle an order whose reservation FAILED — today a FAILED reservation only surfaces through the `orderhub.stock.reservations.failed` metric while the order may still confirm.
 
 **Advanced**
 - Replace the choreography Saga with an orchestrated one (state machine) once the flow grows beyond order → payment.
-- A real compensating transaction: reserve stock in catalog-service on `order.created` and release it on `payment.failed`. Today the saga only moves order status, which is the weakest part of the model.
 - Swap the polling relay for CDC (Debezium reading the outbox table) to drop the poll latency and the extra database load.
 - Contract tests in CI publishing to a Pact Broker instead of copying files.
 

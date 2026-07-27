@@ -507,7 +507,7 @@
               "host": ["{{baseUrl}}"],
               "path": ["api", "v1", "orders", "{{orderId}}"]
             },
-            "description": "The Saga is choreographed, not orchestrated, so confirmation happens asynchronously: order-service publishes OrderCreated -> payment-service consumes it and publishes PaymentApproved/PaymentFailed -> order-service's own consumer flips the order to CONFIRMED (or FAILED). There is no single synchronous call to wait on.\n\nHOW TO USE THIS REQUEST: click Send repeatedly (every second or two) — or select it in the Collection Runner with a delay — until the status field reads CONFIRMED (or FAILED). This is expected to take a few outbox poll cycles, not be instant.\n\nOnce CONFIRMED, check Mailhog at http://localhost:8025 — notification-service consumes PaymentApproved and sends a confirmation email there (dev SMTP, nothing leaves the box)."
+            "description": "The Saga is choreographed, not orchestrated, so confirmation happens asynchronously: order-service publishes OrderCreated -> payment-service consumes it and publishes PaymentApproved/PaymentFailed -> order-service's own consumer flips the order to CONFIRMED (or PAYMENT_FAILED; a stale PENDING order is eventually CANCELLED by the timeout watchdog). There is no single synchronous call to wait on.\n\nHOW TO USE THIS REQUEST: click Send repeatedly (every second or two) — or select it in the Collection Runner with a delay — until the status field reads CONFIRMED (or PAYMENT_FAILED). This is expected to take a few outbox poll cycles, not be instant.\n\nOnce CONFIRMED, check Mailhog at http://localhost:8025 — notification-service consumes PaymentApproved and sends a confirmation email there (dev SMTP, nothing leaves the box)."
           },
           "response": [],
           "event": [
@@ -522,7 +522,7 @@
                   "var status = pm.response.json().status;",
                   "console.log('Current order status:', status);",
                   "pm.test('Order has reached a terminal saga state (informational — re-run if PENDING)', function () {",
-                  "    pm.expect(['PENDING', 'CONFIRMED', 'FAILED']).to.include(status);",
+                  "    pm.expect(['PENDING', 'CONFIRMED', 'PAYMENT_FAILED', 'CANCELLED']).to.include(status);",
                   "});"
                 ]
               }

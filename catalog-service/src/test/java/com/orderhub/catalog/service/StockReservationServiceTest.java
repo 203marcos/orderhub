@@ -6,6 +6,8 @@ import com.orderhub.catalog.entity.StockReservationStatus;
 import com.orderhub.catalog.event.OrderCreatedEvent;
 import com.orderhub.catalog.repository.ProductRepository;
 import com.orderhub.catalog.repository.StockReservationRepository;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -14,6 +16,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
@@ -36,6 +39,7 @@ class StockReservationServiceTest {
 
     @Mock ProductRepository productRepository;
     @Mock StockReservationRepository stockReservationRepository;
+    @Spy MeterRegistry meterRegistry = new SimpleMeterRegistry();
 
     @InjectMocks StockReservationService stockReservationService;
 
@@ -98,6 +102,8 @@ class StockReservationServiceTest {
             ArgumentCaptor<StockReservation> captor = ArgumentCaptor.forClass(StockReservation.class);
             verify(stockReservationRepository).save(captor.capture());
             assertThat(captor.getValue().getStatus()).isEqualTo(StockReservationStatus.FAILED);
+            assertThat(meterRegistry.counter("orderhub.stock.reservations.failed").count())
+                    .isEqualTo(1.0);
         }
 
         @Test
@@ -106,6 +112,20 @@ class StockReservationServiceTest {
             when(stockReservationRepository.findByOrderId(orderId))
                     .thenReturn(Optional.of(new StockReservation(orderId, StockReservationStatus.RESERVED)));
 
+            stockReservationService.reserveStock(eventFor(item(productA, 2)));
+
+            verify(productRepository, never()).decrementStock(any(), anyInt());
+            verify(stockReservationRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("does not retry a FAILED reservation on redelivery — FAILED is terminal")
+        void shouldNotRetryAFailedReservationOnRedelivery() {
+            when(stockReservationRepository.findByOrderId(orderId))
+                    .thenReturn(Optional.of(new StockReservation(orderId, StockReservationStatus.FAILED)));
+
+            // Even if stock was replenished meanwhile, the existence guard wins: the
+            // reservation stays FAILED until a stock.rejected flow exists to settle it.
             stockReservationService.reserveStock(eventFor(item(productA, 2)));
 
             verify(productRepository, never()).decrementStock(any(), anyInt());

@@ -22,6 +22,11 @@ import java.net.InetSocketAddress;
  *   <li>Public routes, notably {@code /auth/login}: no user id exists yet, so this falls
  *       back to the client IP, which is what actually protects login from brute-forcing.</li>
  * </ul>
+ *
+ * <p>Trade-off: Spring's {@code RedisRateLimiter} fails <em>open</em> — if Redis is down,
+ * requests pass unlimited rather than the whole API going dark. The gateway's readiness
+ * probe includes Redis, so an orchestrator pulls an instance whose limiter lost its
+ * backing store out of rotation instead of leaving it serving unthrottled.
  */
 @Component
 public class UserOrIpKeyResolver implements KeyResolver {

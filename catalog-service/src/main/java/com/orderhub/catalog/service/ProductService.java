@@ -45,6 +45,13 @@ public class ProductService {
         return ProductResponse.from(productRepository.save(product));
     }
 
+    /**
+     * Deliberately does NOT write {@code stock}: after creation, stock only moves through
+     * {@link StockReservationService}'s atomic delta queries. Writing the absolute value from
+     * this read-modify-write path would silently overwrite a reservation that ran between this
+     * method's read and its save (lost update). Replenishing stock needs its own atomic
+     * operation — future work, not an entity save.
+     */
     @Transactional
     @CacheEvict(value = RedisConfig.PRODUCTS_CACHE, key = "#id")
     public ProductResponse update(UUID id, ProductRequest request) {
@@ -53,7 +60,6 @@ public class ProductService {
         product.setDescription(request.description());
         product.setPrice(request.price());
         product.setCategory(request.category());
-        product.setStock(request.stock());
         return ProductResponse.from(productRepository.save(product));
     }
 

@@ -93,6 +93,21 @@ class AdminOnlyMutationFilterTest {
             assertThat(response.getStatus()).isEqualTo(403);
             verify(chain, never()).doFilter(request, response);
         }
+
+        @Test
+        @DisplayName("PATCH is rejected without ADMIN even though no PATCH route exists yet — deny by default")
+        void shouldRejectPatchWithoutRoleHeader() throws Exception {
+            // Pins the fail-closed design: any verb outside GET/HEAD/OPTIONS needs ADMIN, so a
+            // future PATCH endpoint is protected the day it is added, not forgotten.
+            MockHttpServletRequest request = new MockHttpServletRequest("PATCH", "/api/v1/products/" + java.util.UUID.randomUUID());
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            FilterChain chain = mock(FilterChain.class);
+
+            filter.doFilterInternal(request, response, chain);
+
+            assertThat(response.getStatus()).isEqualTo(403);
+            verify(chain, never()).doFilter(request, response);
+        }
     }
 
     @Nested

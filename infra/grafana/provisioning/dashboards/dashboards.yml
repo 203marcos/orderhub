@@ -9,12 +9,7 @@ providers:
     updateIntervalSeconds: 30
     allowUiUpdates: true
     options:
-      # NOTE: this path is where the dashboard JSONs would be mounted *inside* the
-      # Grafana container. docker-compose.yml currently only mounts
-      # ./infra/grafana/provisioning -> /etc/grafana/provisioning, so for these
-      # dashboards to actually load, add a second volume to the grafana service:
-      #   - ./infra/grafana/dashboards:/etc/grafana/dashboards
-      # (the dashboard JSONs live in infra/grafana/dashboards/, a sibling of
-      # provisioning/, per the layout this repo already uses for datasources).
+      # The dashboard JSONs live in infra/grafana/dashboards/ (a sibling of provisioning/)
+      # and docker-compose.yml mounts that directory to this container path.
       path: /etc/grafana/dashboards
       foldersFromFilesStructure: false

@@ -39,6 +39,8 @@ spec:
               value: redis
             - name: REDIS_PORT
               value: "6379"
+            - name: KAFKA_SERVERS
+              value: kafka:9092
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: http://jaeger:4317
           readinessProbe:

@@ -116,7 +116,9 @@ class ProductIntegrationTest {
         assertThat(updated.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(updated.getBody().name()).isEqualTo("New Name");
         assertThat(updated.getBody().price()).isEqualByComparingTo("15.00");
-        assertThat(updated.getBody().stock()).isEqualTo(7);
+        // Stock is deliberately not writable through PUT — it only moves via the
+        // reservation saga, so the created value must survive the update untouched.
+        assertThat(updated.getBody().stock()).isEqualTo(3);
     }
 
     @Test

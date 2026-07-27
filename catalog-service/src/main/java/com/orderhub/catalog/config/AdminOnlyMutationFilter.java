@@ -21,8 +21,12 @@ import java.util.Set;
  * consistent with how the rest of the codebase trusts the forwarded identity headers instead
  * of re-parsing tokens.
  *
- * <p>Scoped to {@code /api/v1/products} and to the mutating verbs only, so GET stays open to
- * any authenticated caller.
+ * <p>Scoped to {@code /api/v1/products}. Deny-by-default: only the safe read verbs pass
+ * without the ADMIN role, so a future PATCH (or any new verb) is protected the day it is
+ * added instead of silently bypassing this filter.
+ *
+ * <p>Builds its own RFC 7807 body because a servlet filter runs before the DispatcherServlet,
+ * outside the reach of {@code GlobalExceptionHandler}'s {@code @RestControllerAdvice}.
  */
 @Component
 public class AdminOnlyMutationFilter extends OncePerRequestFilter {
@@ -30,7 +34,7 @@ public class AdminOnlyMutationFilter extends OncePerRequestFilter {
     private static final String PRODUCTS_PATH = "/api/v1/products";
     private static final String ADMIN_ROLE = "ADMIN";
     private static final String ROLE_HEADER = "X-User-Role";
-    private static final Set<String> MUTATING_METHODS = Set.of("POST", "PUT", "DELETE");
+    private static final Set<String> SAFE_METHODS = Set.of("GET", "HEAD", "OPTIONS");
 
     private final ObjectMapper objectMapper;
 
@@ -49,7 +53,7 @@ public class AdminOnlyMutationFilter extends OncePerRequestFilter {
     }
 
     private boolean isMutatingProductsRequest(HttpServletRequest request) {
-        return request.getRequestURI().startsWith(PRODUCTS_PATH) && MUTATING_METHODS.contains(request.getMethod());
+        return request.getRequestURI().startsWith(PRODUCTS_PATH) && !SAFE_METHODS.contains(request.getMethod());
     }
 
     private void respondForbidden(HttpServletResponse response) throws IOException {

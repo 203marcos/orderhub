@@ -49,7 +49,7 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
      *
      * @return the number of rows changed: 1 if this call won the race, 0 if it lost it.
      */
-    @Modifying
+    @Modifying(clearAutomatically = true)
     @Query("update Order o set o.status = :to where o.id = :id and o.status = :from")
     int transitionIfCurrentlyStatus(
             @Param("id") UUID id, @Param("from") OrderStatus from, @Param("to") OrderStatus to);

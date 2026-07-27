@@ -6,6 +6,8 @@ import com.orderhub.catalog.entity.StockReservationStatus;
 import com.orderhub.catalog.event.OrderCreatedEvent;
 import com.orderhub.catalog.repository.ProductRepository;
 import com.orderhub.catalog.repository.StockReservationRepository;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -29,11 +31,19 @@ public class StockReservationService {
 
     private final ProductRepository productRepository;
     private final StockReservationRepository stockReservationRepository;
+    private final Counter failedReservations;
 
     public StockReservationService(ProductRepository productRepository,
-                                    StockReservationRepository stockReservationRepository) {
+                                    StockReservationRepository stockReservationRepository,
+                                    MeterRegistry meterRegistry) {
         this.productRepository = productRepository;
         this.stockReservationRepository = stockReservationRepository;
+        // A FAILED reservation means a confirmed order may have no stock behind it (no
+        // stock.rejected event exists yet to settle it), so it must be alertable, not just a
+        // warning buried in one pod's logs.
+        this.failedReservations = Counter.builder("orderhub.stock.reservations.failed")
+                .description("Orders whose stock reservation failed for insufficient stock")
+                .register(meterRegistry);
     }
 
     /**
@@ -52,8 +62,17 @@ public class StockReservationService {
      * <p>Insufficient stock does not throw. A full implementation would publish
      * {@code stock.rejected} so order-service could settle the order (documented as future
      * work in ARCHITECTURE.md); until that exists, throwing here would only retry the same
-     * failure three times and dead-letter it for no benefit, so this logs a warning and moves
-     * on with a FAILED reservation recorded for inspection.
+     * failure three times and dead-letter it for no benefit, so this logs a warning, bumps the
+     * {@code orderhub.stock.reservations.failed} counter (alert on it — the order may still be
+     * confirmed with no stock behind it) and records a FAILED reservation. FAILED is terminal:
+     * a redelivered {@code order.created} hits the existence guard and does NOT retry the
+     * reservation, even if stock was replenished in between.
+     *
+     * <p>The existence check followed by {@code save} is a deliberate check-then-act: if two
+     * deliveries truly overlap, the loser's save violates the unique constraint, this whole
+     * transaction (decrements included) rolls back, and the retry sees the winner's row. Do
+     * not "fix" it with a try/catch around save — swallowing the exception would keep the
+     * decrements without a reservation row.
      */
     @Transactional
     public void reserveStock(OrderCreatedEvent event) {
@@ -69,6 +88,7 @@ public class StockReservationService {
                 applied.forEach(a -> productRepository.incrementStock(a.productId(), a.quantity()));
                 log.warn("Insufficient stock for product {} (order {}), recording FAILED reservation",
                         item.productId(), event.orderId());
+                failedReservations.increment();
                 saveReservation(event, StockReservationStatus.FAILED);
                 return;
             }
@@ -85,6 +105,12 @@ public class StockReservationService {
      * can redeliver either one. {@link StockReservationRepository#releaseIfReserved} is the
      * atomic RESERVED -> RELEASED transition; only the caller that actually performs it puts
      * stock back, so a redelivery or the other trigger arriving afterwards is a no-op.
+     *
+     * <p>Known edge: Kafka gives no ordering across topics, so a release can theoretically
+     * arrive before its {@code order.created} was consumed (long consumer lag on one topic).
+     * The release no-ops on the missing reservation and the late reservation then holds stock
+     * for an already-terminal order with no third trigger left to free it. Requires a
+     * multi-minute one-sided lag, but if reservations ever leak, look here first.
      */
     @Transactional
     public void releaseReservation(UUID orderId, String trigger) {

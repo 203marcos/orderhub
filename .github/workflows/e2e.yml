@@ -80,11 +80,13 @@ jobs:
       - name: Run the smoke suite
         run: bash scripts/e2e/smoke.sh
 
-      # Only on failure — a green run doesn't need the noise. One block per app service so
+      # On failure OR cancellation — a job that hits timeout-minutes reports as cancelled,
+      # not failed, and a hung compose startup is exactly when these logs matter most.
+      # A green run doesn't need the noise. One block per app service so
       # a failure log is easy to scan without piecing together interleaved output; `ps`
       # afterwards shows which containers (if any) never became healthy at all.
       - name: Dump service logs (on failure)
-        if: failure()
+        if: failure() || cancelled()
         run: |
           for svc in api-gateway auth-service catalog-service order-service payment-service notification-service; do
             echo "::group::docker compose logs --tail 200 ${svc}"
@@ -93,7 +95,7 @@ jobs:
           done
 
       - name: Dump infra logs (on failure)
-        if: failure()
+        if: failure() || cancelled()
         run: |
           for svc in postgres-auth postgres-catalog postgres-order postgres-payment redis kafka mailhog; do
             echo "::group::docker compose logs --tail 200 ${svc}"
@@ -102,7 +104,7 @@ jobs:
           done
 
       - name: Container status (on failure)
-        if: failure()
+        if: failure() || cancelled()
         run: docker compose ps -a
 
       # Always tear down, pass or fail, so a failed run doesn't leave containers/volumes on
