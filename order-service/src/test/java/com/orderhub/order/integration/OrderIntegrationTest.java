@@ -18,11 +18,10 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.kafka.core.KafkaTemplate;
-import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.DockerImageName;
+import org.testcontainers.kafka.ConfluentKafkaContainer;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -44,10 +43,11 @@ class OrderIntegrationTest {
     @ServiceConnection
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
 
+    // ConfluentKafkaContainer runs in KRaft mode; the legacy KafkaContainer started a
+    // ZooKeeper sidecar, which Kafka 4.0 no longer supports.
     @Container
     @ServiceConnection
-    static KafkaContainer kafka = new KafkaContainer(
-            DockerImageName.parse("confluentinc/cp-kafka:7.6.1"));
+    static ConfluentKafkaContainer kafka = new ConfluentKafkaContainer("confluentinc/cp-kafka:7.8.0");
 
     @MockBean
     CatalogClient catalogClient;
