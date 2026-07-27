@@ -1,5 +1,5 @@
 global:
-  imageRegistry: ghcr.io/marcosdias/orderhub
+  imageRegistry: ghcr.io/203marcos/orderhub
   imageTag: latest
   jwtSecret: "dGVzdFNlY3JldEtleUZvckp3dFRlc3RpbmdPcmRlckh1YlByb2plY3QyMDI2IQ=="
 

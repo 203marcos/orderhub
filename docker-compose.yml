@@ -200,10 +200,20 @@ services:
       JWT_SECRET: dGVzdFNlY3JldEtleUZvckp3dFRlc3RpbmdPcmRlckh1YlByb2plY3QyMDI2IQ==
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
     depends_on:
-      - auth-service
-      - catalog-service
-      - order-service
-      - payment-service
+      auth-service:
+        condition: service_healthy
+      catalog-service:
+        condition: service_healthy
+      order-service:
+        condition: service_healthy
+      payment-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
 
   auth-service:
     build:

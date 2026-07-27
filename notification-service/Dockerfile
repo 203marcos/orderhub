@@ -9,7 +9,9 @@ RUN --mount=type=cache,target=/root/.m2 \
 
 # --- runtime stage: small JRE image with only the jar ---
 FROM eclipse-temurin:21-jre-alpine
+RUN addgroup -S spring && adduser -S spring -G spring
 WORKDIR /app
-COPY --from=build /workspace/notification-service/target/*.jar app.jar
+COPY --from=build --chown=spring:spring /workspace/notification-service/target/*.jar app.jar
+USER spring:spring
 EXPOSE 8085
 ENTRYPOINT ["java", "-jar", "app.jar"]
