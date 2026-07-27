@@ -148,4 +148,77 @@
             </plugins>
         </pluginManagement>
     </build>
+
+    <profiles>
+        <!--
+            Opt-in mutation testing (PIT/pitest). Never activates on its own — it is not
+            bound to any lifecycle phase and has no activation trigger, so it has zero
+            effect on `mvn test` / `mvn verify` / CI. A developer runs it explicitly, one
+            module at a time (the aggregator has no bytecode to mutate, and pitest-maven
+            skips "pom"-packaged projects on its own):
+
+                mvnw -Pmutation -pl order-service test-compile org.pitest:pitest-maven:mutationCoverage
+
+            `test-compile` is required first so the module's test classes exist on disk for
+            PIT to discover — it does not run the goal itself. Reports land at
+            <module>/target/pit-reports/index.html (and mutations.xml next to it).
+        -->
+        <profile>
+            <id>mutation</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.pitest</groupId>
+                        <artifactId>pitest-maven</artifactId>
+                        <version>1.19.1</version>
+                        <dependencies>
+                            <!-- Lets PIT discover and run JUnit 5 (Jupiter) tests. -->
+                            <dependency>
+                                <groupId>org.pitest</groupId>
+                                <artifactId>pitest-junit5-plugin</artifactId>
+                                <version>1.2.2</version>
+                            </dependency>
+                        </dependencies>
+                        <configuration>
+                            <targetClasses>
+                                <param>com.orderhub.*</param>
+                            </targetClasses>
+                            <targetTests>
+                                <param>com.orderhub.*</param>
+                            </targetTests>
+                            <!-- *Application classes are just SpringApplication.run(...) bootstraps,
+                                 and DTOs are plain data holders — neither has behaviour worth mutating. -->
+                            <excludedClasses>
+                                <param>*Application</param>
+                                <param>*.dto.*</param>
+                            </excludedClasses>
+                            <!-- Testcontainers integration tests need Docker and Pact contract tests
+                                 verify a fixed pact file — neither belongs in a mutation run. -->
+                            <excludedTestClasses>
+                                <param>*IntegrationTest</param>
+                                <param>*ContractTest</param>
+                            </excludedTestClasses>
+                            <excludedGroups>
+                                <param>${excludedGroups}</param>
+                            </excludedGroups>
+                            <!-- Generous timeout: Spring slice tests (@WebMvcTest, etc.) rebuild an
+                                 application context per mutant, which is slower than a plain unit
+                                 test and would otherwise register as spurious TIMED_OUT mutants. -->
+                            <timeoutConstant>10000</timeoutConstant>
+                            <timeoutFactor>2.0</timeoutFactor>
+                            <threads>1</threads>
+                            <outputFormats>
+                                <outputFormat>HTML</outputFormat>
+                                <outputFormat>XML</outputFormat>
+                            </outputFormats>
+                            <timestampedReports>false</timestampedReports>
+                            <!-- Reporting only for now — no build-breaking score gate. -->
+                            <mutationThreshold>0</mutationThreshold>
+                            <failWhenNoMutations>false</failWhenNoMutations>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

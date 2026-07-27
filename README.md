@@ -147,6 +147,30 @@ The architecture tests are the ones worth a second look: the rules in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) are executable, so the diagram cannot quietly
 drift from the code.
 
+### Mutation testing (opt-in)
+
+The 80% JaCoCo gate says a line *ran*, not that a test would notice if the logic behind it
+broke. [PIT](https://pitest.org) checks the second thing: it tweaks the bytecode (flips a
+condition, changes a return value, removes a call, ...) and reruns the tests — a mutant that
+still passes is a gap the coverage number hides.
+
+It lives behind an opt-in `mutation` profile in the root POM so it never runs in `mvn test` /
+`mvn verify` or in CI; it is a tool you reach for deliberately, one module at a time:
+
+```bash
+./mvnw -Pmutation -pl order-service test-compile org.pitest:pitest-maven:mutationCoverage
+```
+
+Open `order-service/target/pit-reports/index.html`. Testcontainers integration tests and the
+Pact contract tests are excluded (Docker/fixed-pact concerns, not unit-level logic), and
+`*Application` / DTO classes are excluded from mutation (nothing to break).
+
+**Reading the score:** the report's headline percentage is mutants *killed* — a test failed
+because of the change. A **survived** mutant means every test still passed with the logic
+altered, which is the interesting case: either the behavior genuinely isn't asserted anywhere,
+or it's an equivalent mutant (behaves identically no matter what, e.g. dead code) that no test
+ever could kill. Chase the former, don't chase the latter.
+
 ## Key design decisions
 
 - **Async for commands, sync for queries.** Payment runs after the order exists and fans out to multiple consumers → Kafka. Reading a price or a payment detail is immediate → REST/Feign.
