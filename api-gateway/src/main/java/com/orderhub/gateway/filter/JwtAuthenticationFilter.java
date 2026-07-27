@@ -48,7 +48,15 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
     private static final List<String> IDENTITY_HEADERS =
             List.of(USER_ID_HEADER, USER_EMAIL_HEADER, USER_ROLE_HEADER);
 
-    private static final List<String> PUBLIC_PATHS = List.of("/auth/");
+    /**
+     * Paths that never require a token. Besides the auth endpoints, this is the aggregated
+     * API documentation: {@code /swagger-ui*} (the UI itself) and {@code /v3/api-docs*}, which
+     * covers both the gateway's own spec and the per-service specs re-routed underneath it
+     * (e.g. {@code /v3/api-docs/auth-service}, see application.yml's *-docs routes). Nothing
+     * else may be added here — every other route still goes through token validation.
+     */
+    private static final List<String> PUBLIC_PATHS =
+            List.of("/auth/", "/swagger-ui", "/v3/api-docs");
 
     private static final String BEARER_PREFIX = "Bearer ";
 

@@ -23,6 +23,45 @@ spring:
           uri: ${PAYMENT_SERVICE_URL:http://localhost:8084}
           predicates:
             - Path=/api/v1/payments/**
+        # Each service's OpenAPI spec, republished under the gateway so swagger-ui.urls below
+        # can point at them and Swagger UI can fetch every spec through the same origin.
+        - id: auth-service-docs
+          uri: ${AUTH_SERVICE_URL:http://localhost:8081}
+          predicates:
+            - Path=/v3/api-docs/auth-service
+          filters:
+            - RewritePath=/v3/api-docs/auth-service, /v3/api-docs
+        - id: catalog-service-docs
+          uri: ${CATALOG_SERVICE_URL:http://localhost:8082}
+          predicates:
+            - Path=/v3/api-docs/catalog-service
+          filters:
+            - RewritePath=/v3/api-docs/catalog-service, /v3/api-docs
+        - id: order-service-docs
+          uri: ${ORDER_SERVICE_URL:http://localhost:8083}
+          predicates:
+            - Path=/v3/api-docs/order-service
+          filters:
+            - RewritePath=/v3/api-docs/order-service, /v3/api-docs
+        - id: payment-service-docs
+          uri: ${PAYMENT_SERVICE_URL:http://localhost:8084}
+          predicates:
+            - Path=/v3/api-docs/payment-service
+          filters:
+            - RewritePath=/v3/api-docs/payment-service, /v3/api-docs
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    urls:
+      - name: auth-service
+        url: /v3/api-docs/auth-service
+      - name: catalog-service
+        url: /v3/api-docs/catalog-service
+      - name: order-service
+        url: /v3/api-docs/order-service
+      - name: payment-service
+        url: /v3/api-docs/payment-service
 
 jwt:
   secret: ${JWT_SECRET:dGVzdFNlY3JldEtleUZvckp3dFRlc3RpbmdPcmRlckh1YlByb2plY3QyMDI2IQ==}

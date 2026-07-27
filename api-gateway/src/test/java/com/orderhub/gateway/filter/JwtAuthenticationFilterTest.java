@@ -50,6 +50,41 @@ class JwtAuthenticationFilterTest {
     }
 
     @Test
+    void shouldLetSwaggerUiPathThroughWithoutToken() {
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/swagger-ui.html").build());
+        when(chain.filter(any())).thenReturn(Mono.empty());
+
+        filter.filter(exchange, chain).block();
+
+        verify(chain).filter(any());
+    }
+
+    @Test
+    void shouldLetGatewaysOwnApiDocsPathThroughWithoutToken() {
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/v3/api-docs").build());
+        when(chain.filter(any())).thenReturn(Mono.empty());
+
+        filter.filter(exchange, chain).block();
+
+        verify(chain).filter(any());
+    }
+
+    @Test
+    void shouldLetForwardedPerServiceApiDocsPathThroughWithoutToken() {
+        // e.g. /v3/api-docs/order-service, rewritten by the gateway route to the
+        // service's own /v3/api-docs (see application.yml's *-docs routes).
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/v3/api-docs/order-service").build());
+        when(chain.filter(any())).thenReturn(Mono.empty());
+
+        filter.filter(exchange, chain).block();
+
+        verify(chain).filter(any());
+    }
+
+    @Test
     void shouldReturn401WhenAuthorizationHeaderIsMissing() {
         MockServerWebExchange exchange = MockServerWebExchange.from(
                 MockServerHttpRequest.get("/api/v1/orders/my").build());
