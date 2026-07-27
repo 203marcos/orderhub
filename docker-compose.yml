@@ -1,5 +1,17 @@
+# OrderHub — full local stack: infrastructure + all services, observable out of the box.
+#
+#   docker compose up -d --build      # start everything
+#   docker compose down               # stop everything
+#
+# Entry point:      http://localhost:8080        (api-gateway)
+# Swagger per svc:  http://localhost:808x/swagger-ui.html
+# Grafana:          http://localhost:3000        (admin / admin)
+# Jaeger:           http://localhost:16686
+# Mailhog:          http://localhost:8025
+
 services:
 
+  # ---------------------------------------------------------------- databases
   postgres-auth:
     image: postgres:16-alpine
     container_name: orderhub-postgres-auth
@@ -68,6 +80,7 @@ services:
       timeout: 5s
       retries: 5
 
+  # ------------------------------------------------------------- redis / kafka
   redis:
     image: redis:7-alpine
     container_name: orderhub-redis
@@ -116,6 +129,7 @@ services:
       - "1025:1025"
       - "8025:8025"
 
+  # ----------------------------------------------------------- observability
   prometheus:
     image: prom/prometheus:latest
     container_name: orderhub-prometheus
@@ -150,7 +164,7 @@ services:
     image: grafana/promtail:2.9.4
     container_name: orderhub-promtail
     volumes:
-      - /var/log:/var/log
+      - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./infra/promtail/promtail.yml:/etc/promtail/config.yml
     command: -config.file=/etc/promtail/config.yml
     depends_on:
@@ -165,6 +179,152 @@ services:
       - "4318:4318"
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
+
+  # ---------------------------------------------------------------- services
+  api-gateway:
+    build:
+      context: .
+      dockerfile: api-gateway/Dockerfile
+    container_name: orderhub-api-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      AUTH_SERVICE_URL: http://auth-service:8081
+      CATALOG_SERVICE_URL: http://catalog-service:8082
+      ORDER_SERVICE_URL: http://order-service:8083
+      PAYMENT_SERVICE_URL: http://payment-service:8084
+      JWT_SECRET: dGVzdFNlY3JldEtleUZvckp3dFRlc3RpbmdPcmRlckh1YlByb2plY3QyMDI2IQ==
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+    depends_on:
+      - auth-service
+      - catalog-service
+      - order-service
+      - payment-service
+
+  auth-service:
+    build:
+      context: .
+      dockerfile: auth-service/Dockerfile
+    container_name: orderhub-auth-service
+    ports:
+      - "8081:8081"
+    environment:
+      DB_URL: jdbc:postgresql://postgres-auth:5432/auth_db
+      DB_USER: orderhub
+      DB_PASS: orderhub123
+      JWT_SECRET: dGVzdFNlY3JldEtleUZvckp3dFRlc3RpbmdPcmRlckh1YlByb2plY3QyMDI2IQ==
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+    depends_on:
+      postgres-auth:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8081/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  catalog-service:
+    build:
+      context: .
+      dockerfile: catalog-service/Dockerfile
+    container_name: orderhub-catalog-service
+    ports:
+      - "8082:8082"
+    environment:
+      DB_URL: jdbc:postgresql://postgres-catalog:5432/catalog_db
+      DB_USER: orderhub
+      DB_PASS: orderhub123
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+    depends_on:
+      postgres-catalog:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8082/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  order-service:
+    build:
+      context: .
+      dockerfile: order-service/Dockerfile
+    container_name: orderhub-order-service
+    ports:
+      - "8083:8083"
+    environment:
+      DB_URL: jdbc:postgresql://postgres-order:5432/order_db
+      DB_USER: orderhub
+      DB_PASS: orderhub123
+      KAFKA_SERVERS: kafka:29092
+      CATALOG_SERVICE_URL: http://catalog-service:8082
+      PAYMENT_SERVICE_URL: http://payment-service:8084
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+    depends_on:
+      postgres-order:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8083/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  payment-service:
+    build:
+      context: .
+      dockerfile: payment-service/Dockerfile
+    container_name: orderhub-payment-service
+    ports:
+      - "8084:8084"
+    environment:
+      DB_URL: jdbc:postgresql://postgres-payment:5432/payment_db
+      DB_USER: orderhub
+      DB_PASS: orderhub123
+      KAFKA_SERVERS: kafka:29092
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+    depends_on:
+      postgres-payment:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8084/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  notification-service:
+    build:
+      context: .
+      dockerfile: notification-service/Dockerfile
+    container_name: orderhub-notification-service
+    ports:
+      - "8085:8085"
+    environment:
+      KAFKA_SERVERS: kafka:29092
+      MAIL_HOST: mailhog
+      MAIL_PORT: 1025
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+    depends_on:
+      kafka:
+        condition: service_healthy
+      mailhog:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8085/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
 
 volumes:
   postgres-auth-data:
