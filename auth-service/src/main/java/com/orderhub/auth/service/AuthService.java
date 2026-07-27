@@ -8,6 +8,7 @@ import com.orderhub.auth.entity.User;
 import com.orderhub.auth.exception.EmailAlreadyExistsException;
 import com.orderhub.auth.repository.UserRepository;
 import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -51,7 +52,7 @@ public class AuthService {
                 new UsernamePasswordAuthenticationToken(request.email(), request.password())
         );
         User user = userRepository.findByEmail(request.email())
-                .orElseThrow();
+                .orElseThrow(() -> new BadCredentialsException("Invalid email or password"));
         String token = jwtService.generateToken(user);
         return AuthResponse.of(token, jwtService.getExpiration(), user.getEmail(), user.getRole().name());
     }

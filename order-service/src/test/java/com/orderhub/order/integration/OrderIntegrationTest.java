@@ -64,7 +64,7 @@ class OrderIntegrationTest {
                 .thenReturn(new CatalogClient.ProductResponse(productId, "Burger", new BigDecimal("15.90"), true));
 
         CreateOrderRequest request = new CreateOrderRequest(List.of(
-                new OrderItemRequest(productId, "Burger", new BigDecimal("15.90"), 2)
+                new OrderItemRequest(productId, 2)
         ));
 
         HttpHeaders headers = new HttpHeaders();
@@ -121,7 +121,7 @@ class OrderIntegrationTest {
                 .thenReturn(new CatalogClient.ProductResponse(productId, "Pizza", new BigDecimal("30.00"), true));
 
         CreateOrderRequest request = new CreateOrderRequest(List.of(
-                new OrderItemRequest(productId, "Pizza", new BigDecimal("30.00"), 1)
+                new OrderItemRequest(productId, 1)
         ));
 
         HttpHeaders headers = new HttpHeaders();

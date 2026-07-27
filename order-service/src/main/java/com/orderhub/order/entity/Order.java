@@ -42,10 +42,23 @@ public class Order {
 
     public Order() {}
 
+    public Order(UUID userId, String userEmail) {
+        this.userId = userId;
+        this.userEmail = userEmail;
+        this.totalAmount = BigDecimal.ZERO;
+    }
+
     public Order(UUID userId, String userEmail, BigDecimal totalAmount) {
         this.userId = userId;
         this.userEmail = userEmail;
         this.totalAmount = totalAmount;
+    }
+
+    /** Recomputes the total from the current items. The order owns this invariant. */
+    public void recalculateTotal() {
+        this.totalAmount = items.stream()
+                .map(item -> item.getPrice().multiply(BigDecimal.valueOf(item.getQuantity())))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 
     public UUID getId() { return id; }

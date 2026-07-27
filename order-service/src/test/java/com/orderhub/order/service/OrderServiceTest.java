@@ -8,6 +8,7 @@ import com.orderhub.order.entity.Order;
 import com.orderhub.order.entity.OrderItem;
 import com.orderhub.order.entity.OrderStatus;
 import com.orderhub.order.exception.OrderNotFoundException;
+import com.orderhub.order.exception.ProductUnavailableException;
 import com.orderhub.order.kafka.OrderProducer;
 import com.orderhub.order.repository.OrderRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -48,30 +49,38 @@ class OrderServiceTest {
     }
 
     @Test
-    void shouldCreateOrder() {
+    void shouldCreateOrderUsingCatalogPrice() {
         CreateOrderRequest request = new CreateOrderRequest(List.of(
-                new OrderItemRequest(productId, "Product A", new BigDecimal("29.99"), 2)
+                new OrderItemRequest(productId, 2)
         ));
 
-        Order savedOrder = new Order(userId, userEmail, new BigDecimal("59.98"));
-        when(orderRepository.save(any(Order.class))).thenReturn(savedOrder);
         when(catalogClient.getProduct(productId))
                 .thenReturn(new CatalogClient.ProductResponse(productId, "Product A", new BigDecimal("29.99"), true));
+        when(orderRepository.save(any(Order.class))).thenAnswer(inv -> inv.getArgument(0));
 
         OrderResponse response = orderService.createOrder(request, userId, userEmail);
 
-        assertThat(response).isNotNull();
         assertThat(response.userId()).isEqualTo(userId);
+        // Total is computed server-side from the catalog price (29.99 * 2), never from the client.
+        assertThat(response.totalAmount()).isEqualByComparingTo(new BigDecimal("59.98"));
+        assertThat(response.items()).singleElement()
+                .satisfies(item -> assertThat(item.price()).isEqualByComparingTo(new BigDecimal("29.99")));
         verify(orderRepository).save(any(Order.class));
         verify(orderProducer).publish(any());
     }
 
     @Test
-    void shouldReturnProvidedPriceWhenFallbackIsInvoked() {
-        BigDecimal providedPrice = new BigDecimal("29.99");
-        BigDecimal result = orderService.resolvePriceFallback(
-                productId, providedPrice, new RuntimeException("catalog unavailable"));
-        assertThat(result).isEqualByComparingTo(providedPrice);
+    void shouldRejectUnavailableProduct() {
+        CreateOrderRequest request = new CreateOrderRequest(List.of(
+                new OrderItemRequest(productId, 1)
+        ));
+        when(catalogClient.getProduct(productId))
+                .thenReturn(new CatalogClient.ProductResponse(productId, "Product A", new BigDecimal("29.99"), false));
+
+        assertThatThrownBy(() -> orderService.createOrder(request, userId, userEmail))
+                .isInstanceOf(ProductUnavailableException.class);
+        verify(orderRepository, never()).save(any());
+        verify(orderProducer, never()).publish(any());
     }
 
     @Test
