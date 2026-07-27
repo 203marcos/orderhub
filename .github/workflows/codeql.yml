@@ -1,0 +1,58 @@
+name: CodeQL
+
+# Push/PR to main catch regressions before they land; the weekly cron catches new CodeQL
+# query-pack findings against code that hasn't changed. No dedupe guard here like
+# ci.yml's: pushes to main are merges (not the owner's everyday branch pushes, which target
+# feature branches and don't match this trigger), so push+pull_request overlap on main is
+# rare enough not to be worth the extra complexity.
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '30 4 * * 1' # every Monday, 04:30 UTC
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (java-kotlin)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write # required to upload the SARIF results
+      actions: read          # required for the analyze step to read workflow run info
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
+        with:
+          languages: java-kotlin
+          build-mode: manual
+
+      # CodeQL's Java autobuild heuristic frequently mis-orders or skips modules in a
+      # multi-module Maven reactor like this one (8 interdependent modules, several of
+      # which — common-kafka, common-outbox — must be `install`ed before the services that
+      # depend on them will even compile; see ci.yml's "Build and install all modules"
+      # step for the same reasoning). Driving the build explicitly with the exact command
+      # the rest of CI already trusts removes that guesswork; -DskipTests keeps this job
+      # fast since CodeQL only needs compiled bytecode, not test execution.
+      - name: Build all modules (manual mode for CodeQL)
+        run: mvn -B clean package -DskipTests --no-transfer-progress
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
+        with:
+          category: "/language:java-kotlin"
