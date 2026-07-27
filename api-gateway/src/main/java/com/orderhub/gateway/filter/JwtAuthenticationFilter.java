@@ -40,9 +40,11 @@ import java.util.List;
 @Component
 public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
 
-    static final String USER_ID_HEADER = "X-User-Id";
-    static final String USER_EMAIL_HEADER = "X-User-Email";
-    static final String USER_ROLE_HEADER = "X-User-Role";
+    // Public: the rate limiter's KeyResolver (com.orderhub.gateway.ratelimit) reads
+    // USER_ID_HEADER to key authenticated requests by user rather than by IP.
+    public static final String USER_ID_HEADER = "X-User-Id";
+    public static final String USER_EMAIL_HEADER = "X-User-Email";
+    public static final String USER_ROLE_HEADER = "X-User-Role";
 
     /** Headers this filter alone may set. Anything arriving with them is a forgery attempt. */
     private static final List<String> IDENTITY_HEADERS =

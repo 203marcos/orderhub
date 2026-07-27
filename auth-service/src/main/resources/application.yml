@@ -1,9 +1,13 @@
 server:
   port: 8081
+  # Finish in-flight requests before the JVM exits on SIGTERM instead of dropping them mid-response.
+  shutdown: graceful
 
 spring:
   application:
     name: auth-service
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
   threads:
     virtual:
       enabled: true
@@ -25,7 +29,9 @@ spring:
     locations: classpath:db/migration
 
 jwt:
-  secret: ${JWT_SECRET:dGVzdFNlY3JldEtleUZvckp3dFRlc3RpbmdPcmRlckh1YlByb2plY3QyMDI2IQ==}
+  # No default: an unset JWT_SECRET must fail fast at startup rather than silently signing
+  # with a well-known value. Tests supply their own via src/test/resources/application.yml.
+  secret: ${JWT_SECRET}
   expiration: ${JWT_EXPIRATION:86400000}
 
 springdoc:
@@ -42,6 +48,15 @@ management:
   endpoint:
     health:
       show-details: always
+      probes:
+        enabled: true
+      # readiness gates traffic (needs the DB); liveness only asks "is the process alive" so a
+      # DB blip can't trigger a pointless pod restart.
+      group:
+        readiness:
+          include: readinessState,db
+        liveness:
+          include: livenessState
   metrics:
     export:
       prometheus:

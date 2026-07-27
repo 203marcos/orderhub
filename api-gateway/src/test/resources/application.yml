@@ -1,0 +1,4 @@
+# Test-only JWT secret. Never used outside the test classpath — production/local
+# environments must supply JWT_SECRET themselves (see main application.yml).
+jwt:
+  secret: dGVzdFNlY3JldEtleUZvckp3dFRlc3RpbmdPcmRlckh1YlByb2plY3QyMDI2IQ==

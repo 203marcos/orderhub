@@ -61,7 +61,13 @@ derives from the JWT, so publishing them on localhost would let anyone forge tho
 
 **Prerequisites:** Docker (Docker Desktop with BuildKit). Java 21 + Maven are only needed to run tests or a service outside Docker.
 
+**Environment secrets:** copy `.env.example` to `.env` and generate a strong `JWT_SECRET`
+(e.g. `openssl rand -base64 48`) — docker-compose refuses to start `auth-service`/`api-gateway`
+without one, on purpose, so a real secret never ships as a fallback default.
+
 ```bash
+cp .env.example .env   # then fill in JWT_SECRET
+
 # Build every image and start the whole system (infra + 6 services)
 docker compose up -d --build
 

@@ -1,5 +1,9 @@
 OrderHub {{ .Chart.AppVersion }} deployed to namespace "{{ .Release.Namespace | default "orderhub" }}".
 
+Required at install time — no defaults are committed in values.yaml:
+  --set global.jwtSecret=$(openssl rand -base64 48)
+  --set postgres.password=<a strong password>
+
 This chart deploys the SIX application services (api-gateway, auth, catalog, order,
 payment, notification). It expects the following infrastructure to already exist in the
 cluster, reachable by these service names:

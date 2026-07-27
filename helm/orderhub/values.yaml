@@ -1,11 +1,17 @@
 global:
   imageRegistry: ghcr.io/203marcos/orderhub
   imageTag: latest
-  jwtSecret: "dGVzdFNlY3JldEtleUZvckp3dFRlc3RpbmdPcmRlckh1YlByb2plY3QyMDI2IQ=="
+  # No default on purpose: templates/secrets.yaml fails the install with a clear message
+  # if this is left empty, instead of shipping a well-known signing key to every install.
+  # Generate a strong value (e.g. `openssl rand -base64 48`) and pass it explicitly:
+  #   --set global.jwtSecret=<value>
+  jwtSecret: ""
 
 postgres:
-  password: orderhub123
   username: orderhub
+  # Same reasoning as global.jwtSecret above: no committed default, must be provided with
+  #   --set postgres.password=<value>
+  password: ""
 
 apiGateway:
   enabled: true

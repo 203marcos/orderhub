@@ -1,28 +1,66 @@
 server:
   port: 8080
+  # Finish in-flight requests before the JVM exits on SIGTERM instead of dropping them mid-response.
+  shutdown: graceful
 
 spring:
   application:
     name: api-gateway
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
   cloud:
     gateway:
       routes:
+        # Strict limit: protects /auth/login (and /auth/register) from brute-forcing.
+        # Keyed by client IP — these paths are public, so no X-User-Id exists yet.
+        # 5 req/s sustained, burst up to 10 (see UserOrIpKeyResolver for the key logic).
         - id: auth-service
           uri: ${AUTH_SERVICE_URL:http://localhost:8081}
           predicates:
             - Path=/auth/**
+          filters:
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 5
+                redis-rate-limiter.burstCapacity: 10
+                key-resolver: "#{@userOrIpKeyResolver}"
+        # Generous per-user limit on the API routes below: 50 req/s sustained, burst up to
+        # 100. Keyed by the authenticated user id (set by JwtAuthenticationFilter before
+        # this filter runs), so one heavy user can't exhaust another user's budget.
         - id: catalog-service
           uri: ${CATALOG_SERVICE_URL:http://localhost:8082}
           predicates:
             - Path=/api/v1/products/**
+          filters:
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 50
+                redis-rate-limiter.burstCapacity: 100
+                key-resolver: "#{@userOrIpKeyResolver}"
         - id: order-service
           uri: ${ORDER_SERVICE_URL:http://localhost:8083}
           predicates:
             - Path=/api/v1/orders/**
+          filters:
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 50
+                redis-rate-limiter.burstCapacity: 100
+                key-resolver: "#{@userOrIpKeyResolver}"
         - id: payment-service
           uri: ${PAYMENT_SERVICE_URL:http://localhost:8084}
           predicates:
             - Path=/api/v1/payments/**
+          filters:
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 50
+                redis-rate-limiter.burstCapacity: 100
+                key-resolver: "#{@userOrIpKeyResolver}"
         # Each service's OpenAPI spec, republished under the gateway so swagger-ui.urls below
         # can point at them and Swagger UI can fetch every spec through the same origin.
         - id: auth-service-docs
@@ -64,7 +102,9 @@ springdoc:
         url: /v3/api-docs/payment-service
 
 jwt:
-  secret: ${JWT_SECRET:dGVzdFNlY3JldEtleUZvckp3dFRlc3RpbmdPcmRlckh1YlByb2plY3QyMDI2IQ==}
+  # No default: an unset JWT_SECRET must fail fast at startup rather than silently signing
+  # with a well-known value. Tests supply their own via src/test/resources/application.yml.
+  secret: ${JWT_SECRET}
 
 management:
   endpoints:
@@ -73,7 +113,19 @@ management:
         include: health,info,prometheus
   endpoint:
     health:
-      show-details: always
+      # api-gateway is the only instance with a published host port (internet-facing);
+      # every other service is internal to the compose/cluster network. Full health detail
+      # (downstream component status, versions, etc.) must not leak to the outside.
+      show-details: never
+      probes:
+        enabled: true
+      # readiness gates traffic (needs Redis for rate limiting); liveness only asks "is the
+      # process alive" so a Redis blip can't trigger a pointless pod restart.
+      group:
+        readiness:
+          include: readinessState,redis
+        liveness:
+          include: livenessState
   metrics:
     export:
       prometheus:
