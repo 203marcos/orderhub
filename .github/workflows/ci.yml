@@ -133,6 +133,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Trivy resolves the Maven poms to walk transitive dependencies. Without a local
+      # cache it hammers Maven Central and gets rate-limited (429), killing the scan.
+      # Restoring the same cache the test job populated keeps the scan offline.
+      - name: Set up JDK 21 (restore Maven cache)
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Populate the local Maven repository
+        run: mvn -B -q dependency:go-offline --no-transfer-progress
+
       - name: Run Trivy filesystem scan
         uses: aquasecurity/trivy-action@master
         with:
