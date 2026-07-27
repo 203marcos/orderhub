@@ -14,7 +14,10 @@ import java.util.UUID;
  * complementary <em>query</em> path: fetching the payment record for an order on
  * demand. The Pact consumer contract for this interaction lives in the tests.
  */
-@FeignClient(name = "payment-service", url = "${payment.service.url:http://localhost:8084}")
+@FeignClient(
+        name = "payment-service",
+        url = "${payment.service.url:http://localhost:8084}",
+        fallbackFactory = PaymentClientFallback.class)
 public interface PaymentClient {
 
     @GetMapping("/api/v1/payments/order/{orderId}")

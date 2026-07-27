@@ -22,9 +22,14 @@ public class GlobalExceptionHandler {
         return ProblemDetail.forStatusAndDetail(HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage());
     }
 
-    @ExceptionHandler(FeignException.class)
-    public ProblemDetail handleCatalogUnavailable(FeignException ex) {
+    @ExceptionHandler(CatalogUnavailableException.class)
+    public ProblemDetail handleCatalogUnavailable(CatalogUnavailableException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE, "Catalog service is unavailable");
+    }
+
+    @ExceptionHandler(FeignException.class)
+    public ProblemDetail handleFeign(FeignException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE, "A downstream service is unavailable");
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

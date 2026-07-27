@@ -12,7 +12,6 @@ import com.orderhub.order.exception.OrderNotFoundException;
 import com.orderhub.order.exception.ProductUnavailableException;
 import com.orderhub.order.kafka.OrderProducer;
 import com.orderhub.order.repository.OrderRepository;
-import feign.FeignException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -40,7 +39,8 @@ public class OrderService {
         Order order = new Order(userId, userEmail);
 
         request.items().forEach(item -> {
-            CatalogClient.ProductResponse product = fetchProduct(item.productId());
+            // Resilience (circuit breaker + fallback) lives in the Feign client layer.
+            CatalogClient.ProductResponse product = catalogClient.getProduct(item.productId());
             if (!product.available()) {
                 throw new ProductUnavailableException(item.productId());
             }
@@ -90,14 +90,6 @@ public class OrderService {
                 .orElseThrow(() -> new OrderNotFoundException(orderId));
         order.setStatus(OrderStatus.PAYMENT_FAILED);
         orderRepository.save(order);
-    }
-
-    private CatalogClient.ProductResponse fetchProduct(UUID productId) {
-        try {
-            return catalogClient.getProduct(productId);
-        } catch (FeignException.NotFound e) {
-            throw new ProductUnavailableException(productId);
-        }
     }
 
     private OrderCreatedEvent toEvent(Order order) {
