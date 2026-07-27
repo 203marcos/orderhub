@@ -177,6 +177,16 @@ OutboxPublisher (every 500 ms)
   send to Kafka, then set published_at
 ```
 
+**Where the code lives.** The outbox is identical wherever it is used, so it sits in
+`common-outbox` rather than being copied per service. The split from `common-kafka` is by
+dependency, not by taste: notification-service needs the dead-letter handler but has no
+database, and pulling in JPA would break its context.
+
+Neither shared module contains a domain type. All `common-outbox` asks of a service is that
+its events implement `DomainEvent` — declaring their own topic and aggregate id — so the
+library can never become a back door for one service to depend on another's model, and
+`OutboxRecorder` needs no `switch` over event types to route them.
+
 Two consequences worth being explicit about:
 
 - **`SKIP LOCKED`** is what allows more than one replica to run the relay. Without it two

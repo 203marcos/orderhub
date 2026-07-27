@@ -150,6 +150,8 @@ Full trade-off discussion in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ```
 orderhub/
+├── common-kafka/           String producer template + dead-letter error handler
+├── common-outbox/          Transactional outbox: DomainEvent, recorder, relay
 ├── api-gateway/            Spring Cloud Gateway + JWT filter
 ├── auth-service/           Register/login, JWT, PostgreSQL
 ├── catalog-service/        Product CRUD, Redis cache-aside
