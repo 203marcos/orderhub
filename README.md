@@ -41,7 +41,7 @@ flowchart TB
 | **Observability** | Micrometer → Prometheus + Grafana; JSON logs → Loki (Promtail); OpenTelemetry → Jaeger |
 | **Testing** | JUnit 5, Mockito, Testcontainers (PostgreSQL/Kafka/Redis), Pact (consumer + provider) |
 | **API docs** | SpringDoc OpenAPI / Swagger UI per service |
-| **Build & deploy** | Maven multi-module, Docker Compose, GitHub Actions CI |
+| **Build & deploy** | Maven multi-module, Docker Compose, Helm, GitHub Actions CI/CD (build → test → Trivy → push to GHCR) |
 
 ## Running locally
 
@@ -144,7 +144,7 @@ orderhub/
 ├── payment-service/        order.created consumer, payment.* producer, Pact provider
 ├── notification-service/   payment.approved consumer, email via Mailhog
 ├── infra/                  prometheus, grafana, loki, promtail configs
-├── k8s/ · helm/            Kubernetes manifests and Helm chart
+├── helm/orderhub/          Helm chart (deploys the 6 services to Kubernetes)
 ├── docs/ARCHITECTURE.md    Full architecture guide
 └── docker-compose.yml      The entire system, one command
 ```

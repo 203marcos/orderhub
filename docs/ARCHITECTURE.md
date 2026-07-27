@@ -328,7 +328,7 @@ Relationships only exist **within** a service. Cross-service links (e.g., an ord
 
 **Intermediate**
 - Idempotent Kafka consumers (dedupe by event id) and a dead-letter topic.
-- Consolidate the raw `k8s/` manifests and the Helm chart into one source of truth, wired to the images built by the Dockerfiles.
+- Bundle cluster infrastructure (Postgres/Kafka/Redis/Jaeger) as Helm subcharts so `helm install` is self-contained, matching what docker-compose already does locally.
 - Publish the OpenAPI spec aggregated at the gateway.
 
 **Advanced**
