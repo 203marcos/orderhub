@@ -2,6 +2,7 @@ package com.orderhub.catalog.service;
 
 import com.orderhub.catalog.dto.ProductRequest;
 import com.orderhub.catalog.dto.ProductResponse;
+import com.orderhub.catalog.config.RedisConfig;
 import com.orderhub.catalog.entity.Product;
 import com.orderhub.catalog.exception.ProductNotFoundException;
 import com.orderhub.catalog.repository.ProductRepository;
@@ -28,7 +29,7 @@ public class ProductService {
         return productRepository.findByAvailableTrue(pageable).map(ProductResponse::from);
     }
 
-    @Cacheable(value = "products", key = "#id")
+    @Cacheable(value = RedisConfig.PRODUCTS_CACHE, key = "#id")
     public ProductResponse findById(UUID id) {
         return productRepository.findById(id)
                 .map(ProductResponse::from)
@@ -46,7 +47,7 @@ public class ProductService {
     }
 
     @Transactional
-    @CacheEvict(value = "products", key = "#id")
+    @CacheEvict(value = RedisConfig.PRODUCTS_CACHE, key = "#id")
     public ProductResponse update(UUID id, ProductRequest request) {
         Product product = productRepository.findById(id)
                 .orElseThrow(() -> new ProductNotFoundException(id));
@@ -58,7 +59,7 @@ public class ProductService {
     }
 
     @Transactional
-    @CacheEvict(value = "products", key = "#id")
+    @CacheEvict(value = RedisConfig.PRODUCTS_CACHE, key = "#id")
     public void delete(UUID id) {
         if (!productRepository.existsById(id)) {
             throw new ProductNotFoundException(id);

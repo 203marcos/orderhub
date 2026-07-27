@@ -26,6 +26,12 @@ spring:
   cache:
     type: redis
 
+# Cache-aside TTL for the products cache (ISO-8601 or simple duration, e.g. 10m, 30s).
+catalog:
+  cache:
+    products:
+      ttl: ${CACHE_TTL:10m}
+
 springdoc:
   api-docs:
     path: /v3/api-docs
