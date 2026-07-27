@@ -64,7 +64,7 @@ class OrderServiceTest {
     // ---------------------------------------------------------------- helpers
 
     private Order orderOwnedBy(UUID owner) {
-        return new Order(owner, "owner@example.com", new BigDecimal("50.00"));
+        return new Order(owner, "owner@example.com");
     }
 
     private void givenStoredOrder(Order order) {

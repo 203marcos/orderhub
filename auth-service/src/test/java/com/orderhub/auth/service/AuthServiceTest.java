@@ -45,12 +45,16 @@ class AuthServiceTest {
         registerRequest = new RegisterRequest("marcos@orderhub.com", "password123", "Marcos", "Dias");
     }
 
-    @Test
-    void shouldRegisterNewUserAndReturnToken() {
+    private void stubSuccessfulRegistration() {
         when(userRepository.existsByEmail("marcos@orderhub.com")).thenReturn(false);
         when(passwordEncoder.encode("password123")).thenReturn("hashed");
         when(jwtService.generateToken(any(User.class))).thenReturn("a.jwt.token");
         when(jwtService.getExpiration()).thenReturn(3_600_000L);
+    }
+
+    @Test
+    void shouldRegisterNewUserAndReturnToken() {
+        stubSuccessfulRegistration();
 
         AuthResponse response = authService.register(registerRequest);
 
@@ -61,10 +65,7 @@ class AuthServiceTest {
 
     @Test
     void shouldStoreThePasswordHashedAndNeverInPlainText() {
-        when(userRepository.existsByEmail("marcos@orderhub.com")).thenReturn(false);
-        when(passwordEncoder.encode("password123")).thenReturn("hashed");
-        when(jwtService.generateToken(any(User.class))).thenReturn("a.jwt.token");
-        when(jwtService.getExpiration()).thenReturn(3_600_000L);
+        stubSuccessfulRegistration();
 
         authService.register(registerRequest);
 
@@ -77,10 +78,7 @@ class AuthServiceTest {
 
     @Test
     void shouldGiveNewUsersTheUserRoleAndNotAdmin() {
-        when(userRepository.existsByEmail("marcos@orderhub.com")).thenReturn(false);
-        when(passwordEncoder.encode("password123")).thenReturn("hashed");
-        when(jwtService.generateToken(any(User.class))).thenReturn("a.jwt.token");
-        when(jwtService.getExpiration()).thenReturn(3_600_000L);
+        stubSuccessfulRegistration();
 
         authService.register(registerRequest);
 

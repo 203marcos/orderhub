@@ -20,6 +20,15 @@ public class NotificationService {
     }
 
     public void sendOrderConfirmation(PaymentApprovedEvent event) {
+        try {
+            mailSender.send(confirmationMessage(event));
+            log.info("Sent order confirmation email to {} for order {}", event.userEmail(), event.orderId());
+        } catch (Exception ex) {
+            log.error("Failed to send confirmation email for order {}", event.orderId(), ex);
+        }
+    }
+
+    private SimpleMailMessage confirmationMessage(PaymentApprovedEvent event) {
         SimpleMailMessage message = new SimpleMailMessage();
         message.setTo(event.userEmail());
         message.setSubject("Order Confirmed - #" + event.orderId());
@@ -28,12 +37,7 @@ public class NotificationService {
                 event.orderId(),
                 event.amount()
         ));
-        try {
-            mailSender.send(message);
-            log.info("Sent order confirmation email to {} for order {}", event.userEmail(), event.orderId());
-        } catch (Exception ex) {
-            log.error("Failed to send confirmation email for order {}", event.orderId(), ex);
-        }
+        return message;
     }
 
     public void sendPaymentFailedNotification(PaymentFailedEvent event) {

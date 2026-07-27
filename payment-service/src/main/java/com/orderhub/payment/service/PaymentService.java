@@ -56,17 +56,25 @@ public class PaymentService {
         PaymentDecision decision = paymentGateway.authorize(event.orderId(), event.totalAmount());
 
         if (decision.approved()) {
-            payment.approve();
-            Payment saved = paymentRepository.save(payment);
-            outboxRecorder.record(new PaymentApprovedEvent(
-                    event.orderId(), saved.getId(), event.userId(), event.userEmail(),
-                    event.totalAmount(), LocalDateTime.now()));
+            recordApproval(payment, event);
         } else {
-            payment.fail(decision.declineReason());
-            paymentRepository.save(payment);
-            outboxRecorder.record(new PaymentFailedEvent(
-                    event.orderId(), event.userId(), decision.declineReason(), LocalDateTime.now()));
+            recordDecline(payment, event, decision.declineReason());
         }
+    }
+
+    private void recordApproval(Payment payment, OrderCreatedEvent event) {
+        payment.approve();
+        Payment saved = paymentRepository.save(payment);
+        outboxRecorder.record(new PaymentApprovedEvent(
+                event.orderId(), saved.getId(), event.userId(), event.userEmail(),
+                event.totalAmount(), LocalDateTime.now()));
+    }
+
+    private void recordDecline(Payment payment, OrderCreatedEvent event, String reason) {
+        payment.fail(reason);
+        paymentRepository.save(payment);
+        outboxRecorder.record(new PaymentFailedEvent(
+                event.orderId(), event.userId(), reason, LocalDateTime.now()));
     }
 
     /**

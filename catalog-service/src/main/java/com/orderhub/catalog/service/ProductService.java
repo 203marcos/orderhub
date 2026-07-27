@@ -31,9 +31,7 @@ public class ProductService {
 
     @Cacheable(value = RedisConfig.PRODUCTS_CACHE, key = "#id")
     public ProductResponse findById(UUID id) {
-        return productRepository.findById(id)
-                .map(ProductResponse::from)
-                .orElseThrow(() -> new ProductNotFoundException(id));
+        return ProductResponse.from(findProductOrThrow(id));
     }
 
     public Page<ProductResponse> findByCategory(String category, Pageable pageable) {
@@ -49,8 +47,7 @@ public class ProductService {
     @Transactional
     @CacheEvict(value = RedisConfig.PRODUCTS_CACHE, key = "#id")
     public ProductResponse update(UUID id, ProductRequest request) {
-        Product product = productRepository.findById(id)
-                .orElseThrow(() -> new ProductNotFoundException(id));
+        Product product = findProductOrThrow(id);
         product.setName(request.name());
         product.setDescription(request.description());
         product.setPrice(request.price());
@@ -65,5 +62,10 @@ public class ProductService {
             throw new ProductNotFoundException(id);
         }
         productRepository.deleteById(id);
+    }
+
+    private Product findProductOrThrow(UUID id) {
+        return productRepository.findById(id)
+                .orElseThrow(() -> new ProductNotFoundException(id));
     }
 }

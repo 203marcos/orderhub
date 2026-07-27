@@ -26,6 +26,7 @@ import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -167,7 +168,7 @@ class ProductControllerTest {
         @Test
         @DisplayName("returns 404 when the product does not exist")
         void shouldReturn404() throws Exception {
-            org.mockito.Mockito.doThrow(new ProductNotFoundException(productId))
+            doThrow(new ProductNotFoundException(productId))
                     .when(productService).delete(productId);
 
             mockMvc.perform(delete("/api/v1/products/{id}", productId))

@@ -43,8 +43,7 @@ public class AuthService {
                 Role.USER
         );
         userRepository.save(user);
-        String token = jwtService.generateToken(user);
-        return AuthResponse.of(token, jwtService.getExpiration(), user.getEmail(), user.getRole().name());
+        return issueTokenFor(user);
     }
 
     public AuthResponse login(LoginRequest request) {
@@ -53,6 +52,10 @@ public class AuthService {
         );
         User user = userRepository.findByEmail(request.email())
                 .orElseThrow(() -> new BadCredentialsException("Invalid email or password"));
+        return issueTokenFor(user);
+    }
+
+    private AuthResponse issueTokenFor(User user) {
         String token = jwtService.generateToken(user);
         return AuthResponse.of(token, jwtService.getExpiration(), user.getEmail(), user.getRole().name());
     }

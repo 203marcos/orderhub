@@ -39,6 +39,10 @@ class ProductIntegrationTest {
     @Autowired
     private TestRestTemplate restTemplate;
 
+    private ProductResponse createProduct(ProductRequest request) {
+        return restTemplate.postForEntity("/api/v1/products", request, ProductResponse.class).getBody();
+    }
+
     @Test
     void shouldCreateAndRetrieveProduct() {
         ProductRequest request = new ProductRequest("Burger", "Classic cheese burger", new BigDecimal("25.90"), "food");
@@ -61,8 +65,7 @@ class ProductIntegrationTest {
 
     @Test
     void shouldListAvailableProducts() {
-        ProductRequest request = new ProductRequest("Pizza", "Margherita", new BigDecimal("35.00"), "food");
-        restTemplate.postForEntity("/api/v1/products", request, ProductResponse.class);
+        createProduct(new ProductRequest("Pizza", "Margherita", new BigDecimal("35.00"), "food"));
 
         ResponseEntity<String> response = restTemplate.getForEntity("/api/v1/products", String.class);
 
@@ -72,8 +75,7 @@ class ProductIntegrationTest {
 
     @Test
     void shouldListProductsByCategory() {
-        ProductRequest request = new ProductRequest("Soda", "Cola", new BigDecimal("8.00"), "drinks");
-        restTemplate.postForEntity("/api/v1/products", request, ProductResponse.class);
+        createProduct(new ProductRequest("Soda", "Cola", new BigDecimal("8.00"), "drinks"));
 
         ResponseEntity<String> response =
                 restTemplate.getForEntity("/api/v1/products/category/drinks", String.class);
@@ -85,13 +87,12 @@ class ProductIntegrationTest {
     @Test
     void shouldUpdateProduct() {
         ProductRequest initial = new ProductRequest("Old Name", "desc", new BigDecimal("10.00"), "food");
-        ResponseEntity<ProductResponse> created =
-                restTemplate.postForEntity("/api/v1/products", initial, ProductResponse.class);
-        assertThat(created.getBody()).isNotNull();
+        ProductResponse created = createProduct(initial);
+        assertThat(created).isNotNull();
 
         ProductRequest update = new ProductRequest("New Name", "new desc", new BigDecimal("15.00"), "food");
         ResponseEntity<ProductResponse> updated = restTemplate.exchange(
-                "/api/v1/products/" + created.getBody().id(),
+                "/api/v1/products/" + created.id(),
                 HttpMethod.PUT,
                 new HttpEntity<>(update),
                 ProductResponse.class
@@ -105,14 +106,13 @@ class ProductIntegrationTest {
     @Test
     void shouldDeleteProduct() {
         ProductRequest request = new ProductRequest("To Delete", "temp", new BigDecimal("5.00"), "misc");
-        ResponseEntity<ProductResponse> created =
-                restTemplate.postForEntity("/api/v1/products", request, ProductResponse.class);
-        assertThat(created.getBody()).isNotNull();
+        ProductResponse created = createProduct(request);
+        assertThat(created).isNotNull();
 
-        restTemplate.delete("/api/v1/products/" + created.getBody().id());
+        restTemplate.delete("/api/v1/products/" + created.id());
 
         ResponseEntity<String> fetched =
-                restTemplate.getForEntity("/api/v1/products/" + created.getBody().id(), String.class);
+                restTemplate.getForEntity("/api/v1/products/" + created.id(), String.class);
         assertThat(fetched.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
     }
 

@@ -19,6 +19,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -59,8 +60,8 @@ class OrderControllerTest {
 
     private String bodyWithOneItem(int quantity) throws Exception {
         return objectMapper.writeValueAsString(
-                java.util.Map.of("items", List.of(
-                        java.util.Map.of("productId", UUID.randomUUID().toString(), "quantity", quantity))));
+                Map.of("items", List.of(
+                        Map.of("productId", UUID.randomUUID().toString(), "quantity", quantity))));
     }
 
     @Nested

@@ -16,6 +16,7 @@ import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -62,25 +63,56 @@ class OrderIntegrationTest {
     @Autowired
     ObjectMapper objectMapper;
 
+    // ---------------------------------------------------------------- helpers
+
+    private void givenCatalogOffers(UUID productId, String name, String price) {
+        when(catalogClient.getProduct(any()))
+                .thenReturn(new CatalogClient.ProductResponse(productId, name, new BigDecimal(price), true));
+    }
+
+    private HttpHeaders headersFor(UUID userId) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("X-User-Id", userId.toString());
+        return headers;
+    }
+
+    private HttpHeaders headersFor(UUID userId, String email) {
+        HttpHeaders headers = headersFor(userId);
+        headers.set("X-User-Email", email);
+        return headers;
+    }
+
+    private CreateOrderRequest orderRequestFor(UUID productId, int quantity) {
+        return new CreateOrderRequest(List.of(new OrderItemRequest(productId, quantity)));
+    }
+
+    private ResponseEntity<OrderResponse> postOrder(CreateOrderRequest request, HttpHeaders headers) {
+        return restTemplate.postForEntity("/api/v1/orders", new HttpEntity<>(request, headers), OrderResponse.class);
+    }
+
+    private ResponseEntity<String> postOrderRaw(CreateOrderRequest request, HttpHeaders headers) {
+        return restTemplate.postForEntity("/api/v1/orders", new HttpEntity<>(request, headers), String.class);
+    }
+
+    private ResponseEntity<OrderResponse> getOrder(UUID orderId, HttpHeaders headers) {
+        return restTemplate.exchange(
+                "/api/v1/orders/" + orderId, HttpMethod.GET, new HttpEntity<>(headers), OrderResponse.class);
+    }
+
+    private ResponseEntity<String> getOrderRaw(UUID orderId, HttpHeaders headers) {
+        return restTemplate.exchange(
+                "/api/v1/orders/" + orderId, HttpMethod.GET, new HttpEntity<>(headers), String.class);
+    }
+
+    // ---------------------------------------------------------------- tests
+
     @Test
     void shouldCreateOrderSuccessfully() {
         UUID productId = UUID.randomUUID();
-        when(catalogClient.getProduct(any()))
-                .thenReturn(new CatalogClient.ProductResponse(productId, "Burger", new BigDecimal("15.90"), true));
+        givenCatalogOffers(productId, "Burger", "15.90");
 
-        CreateOrderRequest request = new CreateOrderRequest(List.of(
-                new OrderItemRequest(productId, 2)
-        ));
-
-        HttpHeaders headers = new HttpHeaders();
-        headers.set("X-User-Id", UUID.randomUUID().toString());
-        headers.set("X-User-Email", "customer@example.com");
-
-        ResponseEntity<OrderResponse> response = restTemplate.postForEntity(
-                "/api/v1/orders",
-                new HttpEntity<>(request, headers),
-                OrderResponse.class
-        );
+        ResponseEntity<OrderResponse> response = postOrder(
+                orderRequestFor(productId, 2), headersFor(UUID.randomUUID(), "customer@example.com"));
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         assertThat(response.getBody()).isNotNull();
@@ -90,15 +122,7 @@ class OrderIntegrationTest {
 
     @Test
     void shouldReturnNotFoundForUnknownOrder() {
-        HttpHeaders headers = new HttpHeaders();
-        headers.set("X-User-Id", UUID.randomUUID().toString());
-
-        ResponseEntity<String> response = restTemplate.exchange(
-                "/api/v1/orders/" + UUID.randomUUID(),
-                org.springframework.http.HttpMethod.GET,
-                new HttpEntity<>(headers),
-                String.class
-        );
+        ResponseEntity<String> response = getOrderRaw(UUID.randomUUID(), headersFor(UUID.randomUUID()));
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
     }
@@ -106,44 +130,21 @@ class OrderIntegrationTest {
     @Test
     void shouldNotExposeAnotherUsersOrder() {
         UUID productId = UUID.randomUUID();
-        when(catalogClient.getProduct(any()))
-                .thenReturn(new CatalogClient.ProductResponse(productId, "Burger", new BigDecimal("15.90"), true));
+        givenCatalogOffers(productId, "Burger", "15.90");
 
-        HttpHeaders ownerHeaders = new HttpHeaders();
-        ownerHeaders.set("X-User-Id", UUID.randomUUID().toString());
-        ownerHeaders.set("X-User-Email", "owner@example.com");
-
-        CreateOrderRequest request = new CreateOrderRequest(List.of(new OrderItemRequest(productId, 1)));
-        OrderResponse created = restTemplate.postForEntity(
-                "/api/v1/orders", new HttpEntity<>(request, ownerHeaders), OrderResponse.class).getBody();
+        OrderResponse created = postOrder(
+                orderRequestFor(productId, 1), headersFor(UUID.randomUUID(), "owner@example.com")).getBody();
         assertThat(created).isNotNull();
 
-        HttpHeaders attackerHeaders = new HttpHeaders();
-        attackerHeaders.set("X-User-Id", UUID.randomUUID().toString());
-
-        ResponseEntity<String> response = restTemplate.exchange(
-                "/api/v1/orders/" + created.id(),
-                org.springframework.http.HttpMethod.GET,
-                new HttpEntity<>(attackerHeaders),
-                String.class
-        );
+        ResponseEntity<String> response = getOrderRaw(created.id(), headersFor(UUID.randomUUID()));
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
     }
 
     @Test
     void shouldReturnBadRequestForEmptyItems() {
-        CreateOrderRequest request = new CreateOrderRequest(List.of());
-
-        HttpHeaders headers = new HttpHeaders();
-        headers.set("X-User-Id", UUID.randomUUID().toString());
-        headers.set("X-User-Email", "customer@example.com");
-
-        ResponseEntity<String> response = restTemplate.postForEntity(
-                "/api/v1/orders",
-                new HttpEntity<>(request, headers),
-                String.class
-        );
+        ResponseEntity<String> response = postOrderRaw(
+                new CreateOrderRequest(List.of()), headersFor(UUID.randomUUID(), "customer@example.com"));
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
     }
@@ -152,25 +153,13 @@ class OrderIntegrationTest {
     void shouldReturnMyOrders() {
         UUID userId = UUID.randomUUID();
         UUID productId = UUID.randomUUID();
-        when(catalogClient.getProduct(any()))
-                .thenReturn(new CatalogClient.ProductResponse(productId, "Pizza", new BigDecimal("30.00"), true));
+        givenCatalogOffers(productId, "Pizza", "30.00");
+        HttpHeaders headers = headersFor(userId, "customer@example.com");
 
-        CreateOrderRequest request = new CreateOrderRequest(List.of(
-                new OrderItemRequest(productId, 1)
-        ));
-
-        HttpHeaders headers = new HttpHeaders();
-        headers.set("X-User-Id", userId.toString());
-        headers.set("X-User-Email", "customer@example.com");
-
-        restTemplate.postForEntity("/api/v1/orders", new HttpEntity<>(request, headers), OrderResponse.class);
+        postOrder(orderRequestFor(productId, 1), headers);
 
         ResponseEntity<OrderResponse[]> listResponse = restTemplate.exchange(
-                "/api/v1/orders/my",
-                org.springframework.http.HttpMethod.GET,
-                new HttpEntity<>(headers),
-                OrderResponse[].class
-        );
+                "/api/v1/orders/my", HttpMethod.GET, new HttpEntity<>(headers), OrderResponse[].class);
 
         assertThat(listResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(listResponse.getBody()).isNotEmpty();
@@ -179,16 +168,10 @@ class OrderIntegrationTest {
     @Test
     void shouldConfirmOrderWhenPaymentApprovedEventReceived() throws Exception {
         UUID productId = UUID.randomUUID();
-        when(catalogClient.getProduct(any()))
-                .thenReturn(new CatalogClient.ProductResponse(productId, "Pizza", new BigDecimal("30.00"), true));
+        givenCatalogOffers(productId, "Pizza", "30.00");
+        HttpHeaders headers = headersFor(UUID.randomUUID(), "customer@example.com");
 
-        HttpHeaders headers = new HttpHeaders();
-        headers.set("X-User-Id", UUID.randomUUID().toString());
-        headers.set("X-User-Email", "customer@example.com");
-
-        CreateOrderRequest request = new CreateOrderRequest(List.of(new OrderItemRequest(productId, 1)));
-        OrderResponse created = restTemplate.postForEntity(
-                "/api/v1/orders", new HttpEntity<>(request, headers), OrderResponse.class).getBody();
+        OrderResponse created = postOrder(orderRequestFor(productId, 1), headers).getBody();
         assertThat(created).isNotNull();
         UUID orderId = created.id();
 
@@ -200,11 +183,7 @@ class OrderIntegrationTest {
                         new BigDecimal("30.00"), LocalDateTime.now())));
 
         await().atMost(15, TimeUnit.SECONDS).untilAsserted(() -> {
-            OrderResponse fetched = restTemplate.exchange(
-                    "/api/v1/orders/" + orderId,
-                    org.springframework.http.HttpMethod.GET,
-                    new HttpEntity<>(headers),
-                    OrderResponse.class).getBody();
+            OrderResponse fetched = getOrder(orderId, headers).getBody();
             assertThat(fetched).isNotNull();
             assertThat(fetched.status()).isEqualTo(OrderStatus.CONFIRMED);
         });

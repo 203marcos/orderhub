@@ -48,12 +48,6 @@ public class Order {
         this.totalAmount = BigDecimal.ZERO;
     }
 
-    public Order(UUID userId, String userEmail, BigDecimal totalAmount) {
-        this.userId = userId;
-        this.userEmail = userEmail;
-        this.totalAmount = totalAmount;
-    }
-
     /** Recomputes the total from the current items. The order owns this invariant. */
     public void recalculateTotal() {
         this.totalAmount = items.stream()
