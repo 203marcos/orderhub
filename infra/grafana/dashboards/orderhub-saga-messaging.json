@@ -1,0 +1,152 @@
+{
+  "id": null,
+  "uid": "orderhub-saga-messaging",
+  "title": "OrderHub — Saga & Messaging",
+  "description": "Kafka listener throughput/latency/errors for the choreographed saga (order.created, payment.approved, payment.failed) plus live logs from Loki. Metrics come from Spring for Apache Kafka's built-in per-container Micrometer timer (`spring.kafka.listener`, container property micrometerEnabled=true by default — no extra config needed), NOT the newer Observation API (spring.kafka.listener.observation-enabled is not set anywhere in this repo, so don't expect trace-correlated listener metrics). Listener containers here don't set an explicit `id` on @KafkaListener, so the `name` label is whatever Spring auto-assigns per container — use the $listener variable rather than hardcoding a value.",
+  "tags": ["orderhub", "saga", "kafka"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "graphTooltip": 1,
+  "refresh": "30s",
+  "time": { "from": "now-30m", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "job",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": "label_values(spring_kafka_listener_seconds_count, job)",
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "current": { "text": "All", "value": "$__all" },
+        "sort": 1
+      },
+      {
+        "name": "listener",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": "label_values(spring_kafka_listener_seconds_count{job=~\"$job\"}, name)",
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "current": { "text": "All", "value": "$__all" },
+        "sort": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Listener Throughput (msgs/s)",
+      "description": "sum(rate(spring_kafka_listener_seconds_count[5m])) by (job, name) — records processed per second per listener container (order-service's PaymentEventConsumer for payment.approved/payment.failed, payment-service's OrderCreatedConsumer, notification-service's PaymentEventConsumer).",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (job, name) (rate(spring_kafka_listener_seconds_count{job=~\"$job\", name=~\"$listener\"}[$__rate_interval]))",
+          "legendFormat": "{{job}} / {{name}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "spanNulls": true }
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Listener Avg Processing Time (ms)",
+      "description": "sum/count average time spent inside each @KafkaListener method per listener. No histogram buckets are configured for this timer either, so this is a mean, not a p95.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "1000 * sum by (job, name) (rate(spring_kafka_listener_seconds_sum{job=~\"$job\", name=~\"$listener\"}[$__rate_interval])) / sum by (job, name) (rate(spring_kafka_listener_seconds_count{job=~\"$job\", name=~\"$listener\"}[$__rate_interval]))",
+          "legendFormat": "{{job}} / {{name}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "spanNulls": true }
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Listener Failures (DLT-bound)",
+      "description": "rate(spring_kafka_listener_seconds_count{result=\"failure\"}[5m]) by (job, name) — a listener exception here is what DefaultErrorHandler retries 3x (FixedBackOff, 1s) before DeadLetterPublishingRecoverer parks the record on <topic>.dlt (see common-kafka's KafkaReliabilityConfig). Sustained non-zero values here mean records are landing on a .dlt topic and need manual inspection/replay.",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (job, name) (rate(spring_kafka_listener_seconds_count{job=~\"$job\", name=~\"$listener\", result=\"failure\"}[$__rate_interval]))",
+          "legendFormat": "{{job}} / {{name}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": { "drawStyle": "bars", "fillOpacity": 30, "spanNulls": false },
+          "color": { "mode": "fixed", "fixedColor": "red" }
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+    {
+      "id": 4,
+      "type": "logs",
+      "title": "Service Logs",
+      "description": "Live logs from Loki, filtered to the services in scope for $job. Promtail labels every container's log stream with `service` = the docker-compose service name (see infra/promtail/promtail.yml), which is the same string as the Prometheus `job` label used elsewhere on this dashboard, so $job is reused here directly.",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 16 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "expr": "{service=~\"$job\"}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending"
+      }
+    },
+    {
+      "id": 5,
+      "type": "logs",
+      "title": "Error/Warn Logs Only",
+      "description": "Same services, filtered to lines containing ERROR or WARN — the fastest way to spot a failed saga step or a DLT publish without scrolling the full stream. Relies on the JSON structured logging format (logstash-logback-encoder) every service uses.",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 26 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "expr": "{service=~\"$job\"} |~ \"ERROR|WARN\"",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending"
+      }
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+apiVersion: 1
+
+providers:
+  - name: OrderHub
+    orgId: 1
+    folder: OrderHub
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      # The dashboard JSONs live in infra/grafana/dashboards/ (a sibling of provisioning/)
+      # and docker-compose.yml mounts that directory to this container path.
+      path: /etc/grafana/dashboards
+      foldersFromFilesStructure: false

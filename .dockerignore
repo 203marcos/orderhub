@@ -1,0 +1,16 @@
+# Build output
+**/target
+
+# VCS & IDE
+.git
+.gitignore
+.idea
+*.iml
+
+# Docs & infra not needed in the build context
+*.md
+*.txt
+k8s
+helm
+infra
+.github

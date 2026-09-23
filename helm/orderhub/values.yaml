@@ -1,0 +1,74 @@
+global:
+  imageRegistry: ghcr.io/203marcos/orderhub
+  imageTag: latest
+  # No default on purpose: templates/secrets.yaml fails the install with a clear message
+  # if this is left empty, instead of shipping a well-known signing key to every install.
+  # Generate a strong value (e.g. `openssl rand -base64 48`) and pass it explicitly:
+  #   --set global.jwtSecret=<value>
+  jwtSecret: ""
+
+postgres:
+  username: orderhub
+  # Same reasoning as global.jwtSecret above: no committed default, must be provided with
+  #   --set postgres.password=<value>
+  password: ""
+
+apiGateway:
+  enabled: true
+  replicas: 1
+  image: api-gateway
+  port: 8080
+  service:
+    type: LoadBalancer
+
+authService:
+  enabled: true
+  replicas: 1
+  image: auth-service
+  port: 8081
+  db:
+    name: auth_db
+
+catalogService:
+  enabled: true
+  replicas: 1
+  image: catalog-service
+  port: 8082
+  db:
+    name: catalog_db
+
+orderService:
+  enabled: true
+  replicas: 1
+  image: order-service
+  port: 8083
+  db:
+    name: order_db
+
+paymentService:
+  enabled: true
+  replicas: 1
+  image: payment-service
+  port: 8084
+  db:
+    name: payment_db
+
+notificationService:
+  enabled: true
+  replicas: 1
+  image: notification-service
+  port: 8085
+
+# Infrastructure (PostgreSQL per service, Kafka, Redis, Jaeger, Mailhog) is expected to
+# already exist in the cluster — provision it with managed services or the official
+# Bitnami charts, using the service names the apps reference (postgres-<svc>, kafka,
+# redis, jaeger, mailhog). For a batteries-included LOCAL environment use docker-compose,
+# which bundles everything. See the chart NOTES and README for details.
+
+resources:
+  requests:
+    memory: "256Mi"
+    cpu: "100m"
+  limits:
+    memory: "512Mi"
+    cpu: "500m"

@@ -1,5 +1,17 @@
+# OrderHub — full local stack: infrastructure + all services, observable out of the box.
+#
+#   docker compose up -d --build      # start everything
+#   docker compose down               # stop everything
+#
+# Entry point:      http://localhost:8080        (api-gateway)
+# Swagger per svc:  http://localhost:808x/swagger-ui.html
+# Grafana:          http://localhost:3000        (admin / admin)
+# Jaeger:           http://localhost:16686
+# Mailhog:          http://localhost:8025
+
 services:
 
+  # ---------------------------------------------------------------- databases
   postgres-auth:
     image: postgres:16-alpine
     container_name: orderhub-postgres-auth
@@ -34,6 +46,41 @@ services:
       timeout: 5s
       retries: 5
 
+  postgres-order:
+    image: postgres:16-alpine
+    container_name: orderhub-postgres-order
+    environment:
+      POSTGRES_DB: order_db
+      POSTGRES_USER: orderhub
+      POSTGRES_PASSWORD: orderhub123
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres-order-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orderhub -d order_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  postgres-payment:
+    image: postgres:16-alpine
+    container_name: orderhub-postgres-payment
+    environment:
+      POSTGRES_DB: payment_db
+      POSTGRES_USER: orderhub
+      POSTGRES_PASSWORD: orderhub123
+    ports:
+      - "5435:5432"
+    volumes:
+      - postgres-payment-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orderhub -d payment_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ------------------------------------------------------------- redis / kafka
   redis:
     image: redis:7-alpine
     container_name: orderhub-redis
@@ -45,6 +92,44 @@ services:
       timeout: 5s
       retries: 5
 
+  # Single-node KRaft broker — this node is both controller and broker, so there is no
+  # ZooKeeper. Kafka 4.0 removed ZooKeeper support entirely; 7.8 keeps the client and the
+  # broker on the same Kafka version (3.8) as the kafka-clients the services compile against.
+  kafka:
+    image: confluentinc/cp-kafka:7.8.0
+    container_name: orderhub-kafka
+    ports:
+      - "9092:9092"
+    environment:
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qg
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENERS: PLAINTEXT_INTERNAL://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092,CONTROLLER://0.0.0.0:29093
+      # Containers reach the broker as "kafka"; tools on the host reach it as "localhost".
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT_INTERNAL://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT_INTERNAL:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: orderhub-mailhog
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
+  # ----------------------------------------------------------- observability
   prometheus:
     image: prom/prometheus:latest
     container_name: orderhub-prometheus
@@ -62,10 +147,210 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: admin
     volumes:
       - grafana-data:/var/lib/grafana
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning
+      - ./infra/grafana/dashboards:/etc/grafana/dashboards
     depends_on:
       - prometheus
+
+  loki:
+    image: grafana/loki:2.9.4
+    container_name: orderhub-loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./infra/loki/loki.yml:/etc/loki/local-config.yaml
+    command: -config.file=/etc/loki/local-config.yaml
+
+  promtail:
+    image: grafana/promtail:2.9.4
+    container_name: orderhub-promtail
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./infra/promtail/promtail.yml:/etc/promtail/config.yml
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.56
+    container_name: orderhub-jaeger
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+
+  # ---------------------------------------------------------------- services
+  # Only the gateway binds a host port. The downstream services trust the identity
+  # headers (X-User-Id/Email/Role) that the gateway derives from the JWT, so exposing
+  # them on localhost would let anyone bypass authentication by forging those headers.
+  # They stay reachable to each other — and to Prometheus — over the compose network.
+  api-gateway:
+    build:
+      context: .
+      dockerfile: api-gateway/Dockerfile
+    container_name: orderhub-api-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      AUTH_SERVICE_URL: http://auth-service:8081
+      CATALOG_SERVICE_URL: http://catalog-service:8082
+      ORDER_SERVICE_URL: http://order-service:8083
+      PAYMENT_SERVICE_URL: http://payment-service:8084
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+    depends_on:
+      auth-service:
+        condition: service_healthy
+      catalog-service:
+        condition: service_healthy
+      order-service:
+        condition: service_healthy
+      payment-service:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  auth-service:
+    build:
+      context: .
+      dockerfile: auth-service/Dockerfile
+    container_name: orderhub-auth-service
+    expose:
+      - "8081"
+    environment:
+      DB_URL: jdbc:postgresql://postgres-auth:5432/auth_db
+      DB_USER: orderhub
+      DB_PASS: orderhub123
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+    depends_on:
+      postgres-auth:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8081/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  catalog-service:
+    build:
+      context: .
+      dockerfile: catalog-service/Dockerfile
+    container_name: orderhub-catalog-service
+    expose:
+      - "8082"
+    environment:
+      DB_URL: jdbc:postgresql://postgres-catalog:5432/catalog_db
+      DB_USER: orderhub
+      DB_PASS: orderhub123
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      KAFKA_SERVERS: kafka:29092
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+    depends_on:
+      postgres-catalog:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8082/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  order-service:
+    build:
+      context: .
+      dockerfile: order-service/Dockerfile
+    container_name: orderhub-order-service
+    expose:
+      - "8083"
+    environment:
+      DB_URL: jdbc:postgresql://postgres-order:5432/order_db
+      DB_USER: orderhub
+      DB_PASS: orderhub123
+      KAFKA_SERVERS: kafka:29092
+      CATALOG_SERVICE_URL: http://catalog-service:8082
+      PAYMENT_SERVICE_URL: http://payment-service:8084
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+    depends_on:
+      postgres-order:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8083/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  payment-service:
+    build:
+      context: .
+      dockerfile: payment-service/Dockerfile
+    container_name: orderhub-payment-service
+    expose:
+      - "8084"
+    environment:
+      DB_URL: jdbc:postgresql://postgres-payment:5432/payment_db
+      DB_USER: orderhub
+      DB_PASS: orderhub123
+      KAFKA_SERVERS: kafka:29092
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+    depends_on:
+      postgres-payment:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8084/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  notification-service:
+    build:
+      context: .
+      dockerfile: notification-service/Dockerfile
+    container_name: orderhub-notification-service
+    expose:
+      - "8085"
+    environment:
+      KAFKA_SERVERS: kafka:29092
+      MAIL_HOST: mailhog
+      MAIL_PORT: 1025
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+    depends_on:
+      kafka:
+        condition: service_healthy
+      mailhog:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8085/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
 
 volumes:
   postgres-auth-data:
   postgres-catalog-data:
+  postgres-order-data:
+  postgres-payment-data:
   grafana-data:
