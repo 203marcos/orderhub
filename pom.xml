@@ -43,7 +43,7 @@
              overrides when the Boot parent is upgraded past these versions. -->
         <tomcat.version>10.1.55</tomcat.version>
         <spring-security.version>6.5.9</spring-security.version>
-        <bouncycastle.version>1.84</bouncycastle.version>
+        <bouncycastle.version>1.86</bouncycastle.version>
         <!-- Test groups excluded by default (fast `mvn test`). Override with
              -DexcludedGroups= (empty) to also run @Tag("integration") Testcontainers tests. -->
         <excludedGroups>integration</excludedGroups>
