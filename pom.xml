@@ -34,7 +34,7 @@
         <spring-cloud.version>2024.0.0</spring-cloud.version>
         <jjwt.version>0.12.6</jjwt.version>
         <testcontainers.version>1.20.4</testcontainers.version>
-        <springdoc.version>2.6.0</springdoc.version>
+        <springdoc.version>3.1.1</springdoc.version>
         <archunit.version>1.4.1</archunit.version>
         <logstash-logback-encoder.version>7.4</logstash-logback-encoder.version>
         <!-- CVE overrides on top of Boot 3.4.1's managed versions — the Trivy gate blocks
